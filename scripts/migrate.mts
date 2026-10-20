@@ -3,7 +3,8 @@ import postgres from "postgres";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
 
-const url = process.env.DATABASE_URL;
+// The direct (unpooled) connection is safer for migrations behind Neon's pooler.
+const url = process.env.DATABASE_URL_UNPOOLED ?? process.env.DATABASE_URL;
 if (!url) {
   console.log("DATABASE_URL not set, skipping migrations (local dev migrates on startup).");
   process.exit(0);

@@ -18,6 +18,8 @@ export type SheetDay = {
   profit: number;
   services: number;
   employee: number;
+  cpc: number;
+  cvr: number;
 };
 /** Costs only entered on a month's total row, not on any day. */
 export type MonthExtra = { month: string; services: number; employee: number };
@@ -37,6 +39,8 @@ const COLUMNS: [Field, RegExp][] = [
   ["profit", /^profit$/i],
   ["services", /^services?$/i],
   ["employee", /employee|staff|salar/i],
+  ["cpc", /^cpc$/i],
+  ["cvr", /^(cvr|conversion rate)/i],
 ];
 const MONTHS = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
 
@@ -125,7 +129,7 @@ export function parseProfitSheet(data: ArrayBuffer, filename: string, year?: num
     if (!cols) continue;
     const date = parseDate(first, year);
     if (date) {
-      const day: SheetDay = { date, revenue: 0, cogs: 0, adSpend: 0, fees: 0, profit: 0, services: 0, employee: 0 };
+      const day: SheetDay = { date, revenue: 0, cogs: 0, adSpend: 0, fees: 0, profit: 0, services: 0, employee: 0, cpc: 0, cvr: 0 };
       for (const f of cols.keys()) day[f] = value(r, f);
       for (const f of ["adSpend", "cogs"] as const) for (const i of cols.get(f) ?? []) if (parseMoney(r[i] ?? "", decimal)) moneyCells[f].push(r[i]);
       block.push(day);
@@ -199,7 +203,7 @@ export async function importProfitSheet(storeId: number, sheet: ParsedSheet, wit
     if (d.adSpend > 0) {
       if (manual.has(d.date)) result.adSpendSkipped++;
       else {
-        adRows.push({ date: d.date, storeId, platform: "Google Ads", currency: adCurrency, amount: d.adSpend, amountBase: await toBase(d.adSpend, adCurrency, d.date), note: "From the old profit sheet", source: "sheet" });
+        adRows.push({ date: d.date, storeId, platform: "Google Ads", currency: adCurrency, amount: d.adSpend, amountBase: await toBase(d.adSpend, adCurrency, d.date), cpc: d.cpc > 0 ? d.cpc : null, cvr: d.cvr > 0 ? d.cvr : null, note: "From the old profit sheet", source: "sheet" });
         result.adSpendDays++;
       }
     }
@@ -217,6 +221,7 @@ export async function importProfitSheet(storeId: number, sheet: ParsedSheet, wit
       adSpend: d.adSpend,
       fees: d.fees,
       profit: d.profit,
+      cvr: d.cvr || null,
     });
   }
   for (let i = 0; i < adRows.length; i += 500) await db.insert(schema.adSpend).values(adRows.slice(i, i + 500));

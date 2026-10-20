@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { buildSheet, ratios, type DayRow } from "@/lib/report";
+import { adStats, buildSheet, ratios, type DayRow } from "@/lib/report";
 import { readOnlyQuery } from "@/db";
 import { listStores } from "@/lib/stores";
 import { today } from "@/lib/dates";
@@ -31,6 +31,7 @@ export default async function ProfitSheetPage(props: PageProps<"/">) {
   const cur = sheet.currency;
   const t = sheet.total;
   const tr = ratios(t);
+  const ta = adStats(t);
   const lastDay = to < today() ? to : today();
   const visibleDays = sheet.days.filter((d) => d.date <= lastDay);
   const noAdDays = visibleDays.filter((d) => d.orders > 0 && d.adSpend === 0).length;
@@ -44,7 +45,7 @@ export default async function ProfitSheetPage(props: PageProps<"/">) {
     { label: "Revenue", value: money(t.revenue, cur), sub: `after ${money(t.refunds, cur)} refunds` },
     { label: storeId ? "Profit" : "Net profit", value: money(t.profit, cur), sub: storeId ? `${pct(tr.profitPct)} of gross` : `after ${money(t.expenses, cur)} business expenses`, tone: t.profit < 0 ? "neg" : undefined },
     { label: "Ad spend", value: money(t.adSpend, cur), sub: `+ ${money(t.mediaFee, cur)} media buyer fee` },
-    { label: "ROAS", value: ratio(tr.roas), sub: `gross ${ratio(tr.grossRoas)}` },
+    { label: "ROAS", value: ratio(tr.roas), sub: `gross ${ratio(tr.grossRoas)} · CPC ${ta.cpc == null ? "—" : money(ta.cpc, cur)} · CVR ${pct(ta.cvr)}` },
     { label: "POAS", value: ratio(tr.poas), sub: "profit ÷ ad spend" },
     { label: "Orders", value: t.orders.toLocaleString("en-GB"), sub: `${t.ordersInvoiced} invoiced${t.ordersSheetCogs ? ` · ${t.ordersSheetCogs} sheet COG` : ""} · COGS ${pct(tr.cogsPct)}` },
   ];
@@ -135,9 +136,10 @@ export default async function ProfitSheetPage(props: PageProps<"/">) {
 }
 
 function SheetTable({ days, total, currency, month, lastDay, withExpenses }: { days: DayRow[]; total: DayRow; currency: string; month: string; lastDay: string; withExpenses: boolean }) {
-  const cols = ["Date", "Gross revenue", "Refunds", "Revenue", "Cost of goods", "Ad spend", "Media buyer fee", "Transaction fees", ...(withExpenses ? ["Business expenses"] : []), "Profit", "ROAS", "Gross ROAS", "Profit %", "COG %", "POAS"];
+  const cols = ["Date", "Gross revenue", "Refunds", "Revenue", "Cost of goods", "Ad spend", "Media buyer fee", "Transaction fees", ...(withExpenses ? ["Business expenses"] : []), "Profit", "ROAS", "Gross ROAS", "Profit %", "COG %", "POAS", "CPC", "CVR %"];
   const row = (d: DayRow, label: string, isTotal = false) => {
     const r = ratios(d);
+    const a = adStats(d);
     const empty = !isTotal && d.date > lastDay;
     const m = (n: number) => (empty ? "" : money(n, currency));
     return (
@@ -157,6 +159,8 @@ function SheetTable({ days, total, currency, month, lastDay, withExpenses }: { d
         <td>{empty ? "" : pct(r.profitPct)}</td>
         <td>{empty ? "" : pct(r.cogsPct)}</td>
         <td>{empty ? "" : ratio(r.poas)}</td>
+        <td>{empty || a.cpc == null ? (!empty && d.adSpend > 0 ? <span className="text-warn-text" title="Enter the CPC with the ad spend">—</span> : "") : money(a.cpc, currency)}</td>
+        <td>{empty || a.cvr == null ? "" : pct(a.cvr)}{!empty && a.cvr != null && d.cvrCalculated && <span title="No conversion rate entered: orders ÷ clicks" className="ml-1 text-xs text-muted">calc</span>}</td>
       </tr>
     );
   };

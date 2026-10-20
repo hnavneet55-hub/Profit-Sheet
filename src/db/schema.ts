@@ -144,6 +144,11 @@ export const adSpend = pgTable(
     currency: text("currency").notNull(),
     amount: doublePrecision("amount").notNull(),
     amountBase: doublePrecision("amount_base"),
+    // Cost per click from the ad account, same currency as amount. Clicks = amount / cpc.
+    cpc: doublePrecision("cpc"),
+    // Conversion rate in %, entered by hand (Shopify's session-based rate isn't reliable).
+    // Without it, the dashboard falls back to the day's orders / clicks.
+    cvr: doublePrecision("cvr"),
     note: text("note"),
     source: text("source").notNull().default("manual"), // manual | sheet (imported from a profit sheet)
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -249,6 +254,7 @@ export const sheetDays = pgTable(
     adSpend: doublePrecision("ad_spend"),
     fees: doublePrecision("fees"),
     profit: doublePrecision("profit"),
+    cvr: doublePrecision("cvr"), // conversion rate % as the sheet had it, for comparison
     importedAt: timestamp("imported_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [primaryKey({ columns: [t.storeId, t.date] })],

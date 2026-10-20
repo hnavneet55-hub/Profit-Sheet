@@ -93,7 +93,7 @@ export async function syncNow(form: FormData) {
 
 // ---- Ad spend ----
 
-async function insertAdSpend(rows: { date: string; storeId: number | null; platform: string; account: string | null; currency: string; amount: number; note: string | null }[]) {
+async function insertAdSpend(rows: { date: string; storeId: number | null; platform: string; account: string | null; currency: string; amount: number; cpc: number | null; cvr: number | null; note: string | null }[]) {
   const db = await getDb();
   const values = [];
   for (const r of rows) values.push({ ...r, amountBase: await toBase(r.amount, r.currency, r.date) });
@@ -111,19 +111,19 @@ export async function addAdSpend(form: FormData) {
   };
   const bulk = str(form, "bulk");
   if (bulk) {
-    // One "YYYY-MM-DD amount" per line; tab, comma, semicolon or space separated.
+    // One "YYYY-MM-DD amount CPC CVR%" per line; tab, semicolon or space separated.
     const rows = bulk
       .split("\n")
       .map((l) => l.trim())
       .filter(Boolean)
       .map((l) => {
-        const [date, amount] = l.split(/[\t;, ]+/);
-        return { date, amount: Number(amount) };
+        const [date, amount, cpc, cvr] = l.split(/[\t; ]+/).map((v) => v.replace(",", ".").replace("%", ""));
+        return { date, amount: Number(amount), cpc: Number(cpc) || null, cvr: Number(cvr) || null };
       })
       .filter((r) => /^\d{4}-\d{2}-\d{2}$/.test(r.date) && Number.isFinite(r.amount));
     await insertAdSpend(rows.map((r) => ({ ...base, ...r })));
   } else {
-    await insertAdSpend([{ ...base, date: str(form, "date"), amount: numOr(form, "amount") }]);
+    await insertAdSpend([{ ...base, date: str(form, "date"), amount: numOr(form, "amount"), cpc: numOr(form, "cpc") || null, cvr: numOr(form, "cvr") || null }]);
   }
   revalidatePath("/", "layout");
 }

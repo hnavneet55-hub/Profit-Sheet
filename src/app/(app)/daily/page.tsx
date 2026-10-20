@@ -30,6 +30,7 @@ export default async function DailyCheckPage(props: PageProps<"/daily">) {
     return {
       store: s,
       noAds: cells.filter((c) => c.orders > 0 && c.adRows === 0).length,
+      noCpc: cells.filter((c) => c.adNoCpc > 0).length,
       notInvoiced: cells.reduce((n, c) => n + (c.sheetCogs && c.invoiced < c.orders ? 0 : c.orders - c.invoiced), 0),
       orders: cells.reduce((n, c) => n + c.orders, 0),
       pending: pendingBy.get(s.id) ?? 0,
@@ -56,8 +57,8 @@ export default async function DailyCheckPage(props: PageProps<"/daily">) {
       {!stores.length && <p className="text-sm text-muted">No active stores. <Link className="underline" href="/stores/new">Add a store</Link>.</p>}
 
       <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        {summary.map(({ store, noAds, notInvoiced, orders, pending }) => {
-          const ok = !noAds && !notInvoiced && !pending && !store.lastSyncError;
+        {summary.map(({ store, noAds, noCpc, notInvoiced, orders, pending }) => {
+          const ok = !noAds && !noCpc && !notInvoiced && !pending && !store.lastSyncError;
           return (
             <div key={store.id} className="card space-y-1 px-4 py-3 text-sm">
               <div className="flex items-center justify-between gap-2">
@@ -65,6 +66,7 @@ export default async function DailyCheckPage(props: PageProps<"/daily">) {
                 <span className={ok ? "text-positive" : "text-warn-text"}>{ok ? "✓ Up to date" : "Needs attention"}</span>
               </div>
               <div className={noAds ? "text-negative" : "text-muted"}>{noAds ? `${noAds} day${noAds === 1 ? "" : "s"} without ad spend` : "Ad spend entered every day"}</div>
+              {noCpc > 0 && <div className="text-warn-text">{noCpc} day{noCpc === 1 ? "" : "s"} without CPC or CVR</div>}
               <div className={notInvoiced ? "text-warn-text" : "text-muted"}>
                 {orders === 0 ? "No orders" : notInvoiced ? `${notInvoiced} of ${orders} orders not invoiced` : `All ${orders} orders invoiced`}
               </div>
@@ -111,6 +113,7 @@ function Cell({ storeId, date, c }: { storeId: number; date: string; c: DayStatu
       <div className={c.adRows ? "text-positive" : c.orders ? "font-medium text-negative" : "text-muted"}>
         {c.adRows ? `✓ Ads ${money(c.adSpend, c.adCurrency ?? "USD")}` : c.orders ? "✗ No ad spend" : "No ad spend"}
       </div>
+      {c.adNoCpc > 0 && <div className="text-xs text-warn-text">CPC or CVR missing</div>}
       <div>
         {c.orders === 0 ? (
           <span className="text-muted">No orders</span>

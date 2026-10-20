@@ -29,6 +29,13 @@
       "when": 1792517945397,
       "tag": "0003_store_timezone",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1792518251671,
+      "tag": "0004_ad_cpc_cvr",
+      "breakpoints": true
     }
   ]
 }

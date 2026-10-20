@@ -21,6 +21,10 @@ export type DayRow = {
   ordersInvoiced: number; // cost of goods from a supplier invoice, not the SKU estimate
   ordersSheetCogs: number; // cost of goods from the old profit sheet (day not fully invoiced)
   expenses: number; // business expenses (salaries, software…); all-stores view only
+  clicks: number; // ad spend ÷ CPC, where a CPC was entered
+  clickSpend: number; // the ad spend those clicks came from (for the CPC)
+  clickOrders: number; // buyers among those clicks: entered CVR × clicks, else the day's orders
+  cvrCalculated: boolean; // some of the day's conversion rate is orders ÷ clicks, not entered
 };
 
 export type Ratios = {
@@ -58,7 +62,16 @@ const empty = (date: string): DayRow => ({
   ordersInvoiced: 0,
   ordersSheetCogs: 0,
   expenses: 0,
+  clicks: 0,
+  clickSpend: 0,
+  clickOrders: 0,
+  cvrCalculated: false,
 });
+
+/** Cost per click and conversion rate (entered by hand, else orders ÷ ad clicks; never Shopify's). */
+export function adStats(d: Pick<DayRow, "clicks" | "clickSpend" | "clickOrders">): { cpc: number | null; cvr: number | null } {
+  return { cpc: d.clicks ? d.clickSpend / d.clicks : null, cvr: d.clicks ? d.clickOrders / d.clicks : null };
+}
 
 export type Sheet = { currency: string; days: DayRow[]; total: DayRow };
 
@@ -106,10 +119,12 @@ export async function buildSheet(opts: { storeId?: number; from: string; to: str
       .filter((r) => r.cogs != null)
       .map((r) => [`${r.storeId}|${r.date}`, r.cogs!]),
   );
+  const ordersByStoreDay = new Map<string, number>();
   for (const r of orderRows) {
     const d = days.get(r.date);
     if (!d) continue;
     const orders = Number(r.orders);
+    ordersByStoreDay.set(`${r.storeId}|${r.date}`, orders);
     const invoiced = Number(r.invoiced);
     const fromSheet = invoiced < orders ? sheetCogs.get(`${r.storeId}|${r.date}`) : undefined;
     d.gross += Number(r.gross);
@@ -139,9 +154,14 @@ export async function buildSheet(opts: { storeId?: number; from: string; to: str
 
   const adRows = await db
     .select({
+      storeId: schema.adSpend.storeId,
       date: schema.adSpend.date,
       amount: sql<number>`coalesce(sum(${schema.adSpend.amountBase}), 0)`,
       fee: sql<number>`coalesce(sum(${schema.adSpend.amountBase} * coalesce(${schema.stores.mediaBuyerFeePct}, 0) / 100), 0)`,
+      clicks: sql<number>`coalesce(sum(${schema.adSpend.amount} / ${schema.adSpend.cpc}) filter (where ${schema.adSpend.cpc} > 0), 0)`,
+      clickSpend: sql<number>`coalesce(sum(${schema.adSpend.amountBase}) filter (where ${schema.adSpend.cpc} > 0), 0)`,
+      // Buyers implied by the entered rate; null when no row of the day has one.
+      buyers: sql<number | null>`sum(${schema.adSpend.amount} / ${schema.adSpend.cpc} * ${schema.adSpend.cvr} / 100) filter (where ${schema.adSpend.cpc} > 0 and ${schema.adSpend.cvr} is not null)`,
     })
     .from(schema.adSpend)
     .leftJoin(schema.stores, eq(schema.adSpend.storeId, schema.stores.id))
@@ -152,12 +172,21 @@ export async function buildSheet(opts: { storeId?: number; from: string; to: str
         storeId ? eq(schema.adSpend.storeId, storeId) : undefined,
       ),
     )
-    .groupBy(schema.adSpend.date);
+    .groupBy(schema.adSpend.storeId, schema.adSpend.date);
   for (const r of adRows) {
     const d = days.get(r.date);
     if (!d) continue;
-    d.adSpend = Number(r.amount);
-    d.mediaFee = Number(r.fee);
+    d.adSpend += Number(r.amount);
+    d.mediaFee += Number(r.fee);
+    if (Number(r.clicks) > 0) {
+      d.clicks += Number(r.clicks);
+      d.clickSpend += Number(r.clickSpend);
+      if (r.buyers != null) d.clickOrders += Number(r.buyers);
+      else {
+        d.clickOrders += ordersByStoreDay.get(`${r.storeId}|${r.date}`) ?? 0;
+        d.cvrCalculated = true;
+      }
+    }
   }
 
   if (!storeId) {
@@ -174,7 +203,7 @@ export async function buildSheet(opts: { storeId?: number; from: string; to: str
   }
 
   const total = empty("total");
-  const money = ["gross", "refunds", "cogs", "adSpend", "mediaFee", "fees"] as const;
+  const money = ["gross", "refunds", "cogs", "adSpend", "mediaFee", "fees", "clickSpend"] as const;
   for (const d of days.values()) {
     if (currency !== BASE_CURRENCY && (d.gross || d.refunds || d.adSpend || d.cogs || d.fees)) {
       const k = await rateFromBase(currency, d.date);
@@ -182,7 +211,8 @@ export async function buildSheet(opts: { storeId?: number; from: string; to: str
     }
     d.revenue = d.gross - d.refunds;
     d.profit = d.revenue - d.cogs - d.adSpend - d.mediaFee - d.fees - d.expenses;
-    for (const f of [...money, "expenses", "revenue", "profit", "orders", "ordersMissingCogs", "ordersInvoiced", "ordersSheetCogs"] as const) total[f] += d[f];
+    for (const f of [...money, "expenses", "revenue", "profit", "orders", "ordersMissingCogs", "ordersInvoiced", "ordersSheetCogs", "clicks", "clickOrders"] as const) total[f] += d[f];
+    total.cvrCalculated ||= d.cvrCalculated;
   }
   return { currency, days: [...days.values()], total };
 }

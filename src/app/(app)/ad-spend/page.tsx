@@ -39,14 +39,22 @@ export default async function AdSpendPage() {
             <input id="currency" name="currency" className="input uppercase" maxLength={3} defaultValue={stores[0]?.reportingCurrency ?? "USD"} required />
           </div>
         </div>
-        <div className="grid gap-4 sm:grid-cols-3">
+        <div className="grid gap-4 sm:grid-cols-5">
           <div>
             <label className="label" htmlFor="date">Date</label>
             <input id="date" name="date" type="date" className="input" defaultValue={addDays(today(), -1)} />
           </div>
           <div>
             <label className="label" htmlFor="amount">Amount</label>
-            <input id="amount" name="amount" className="input" inputMode="decimal" />
+            <input id="amount" name="amount" className="input" inputMode="decimal" required />
+          </div>
+          <div>
+            <label className="label" htmlFor="cpc">CPC (cost per click)</label>
+            <input id="cpc" name="cpc" className="input" inputMode="decimal" required />
+          </div>
+          <div>
+            <label className="label" htmlFor="cvr">Conversion rate %</label>
+            <input id="cvr" name="cvr" className="input" inputMode="decimal" required placeholder="buyers ÷ visitors" />
           </div>
           <div>
             <label className="label" htmlFor="note">Note</label>
@@ -55,8 +63,8 @@ export default async function AdSpendPage() {
         </div>
         <details>
           <summary className="cursor-pointer text-sm text-muted">Or paste several days at once</summary>
-          <textarea name="bulk" rows={6} className="input mt-2 font-mono" placeholder={"2026-10-01\t120.50\n2026-10-02\t98.00"} />
-          <p className="mt-1 text-xs text-muted">One day per line: date and amount, separated by a tab, comma or space. Copying two columns from Google Ads or a sheet works.</p>
+          <textarea name="bulk" rows={6} className="input mt-2 font-mono" placeholder={"2026-10-01\t120.50\t0.62\t1.85\n2026-10-02\t98.00\t0.58\t2.10"} />
+          <p className="mt-1 text-xs text-muted">One day per line: date, amount, CPC and conversion rate %, separated by a tab or space. Copying columns from Google Ads or your sheet works. Don&apos;t use Shopify&apos;s conversion rate; when a day has none, the dashboard shows orders ÷ clicks instead.</p>
         </details>
         <button className="btn" disabled={!stores.length}>Add ad spend</button>
         {!stores.length && <p className="text-sm text-muted">Add a store first.</p>}
@@ -64,7 +72,7 @@ export default async function AdSpendPage() {
 
       <div className="card overflow-x-auto">
         <table className="table num">
-          <thead><tr><th>Date</th><th>Store</th><th>Platform</th><th>Account</th><th className="text-right">Amount</th><th>Note</th><th></th></tr></thead>
+          <thead><tr><th>Date</th><th>Store</th><th>Platform</th><th>Account</th><th className="text-right">Amount</th><th className="text-right">CPC</th><th className="text-right">Clicks</th><th className="text-right">CVR</th><th>Note</th><th></th></tr></thead>
           <tbody>
             {rows.map(({ a, storeName }) => (
               <tr key={a.id}>
@@ -73,6 +81,9 @@ export default async function AdSpendPage() {
                 <td>{a.platform}</td>
                 <td>{a.account ?? ""}</td>
                 <td className="text-right">{money(a.amount, a.currency)}</td>
+                <td className="text-right">{a.cpc ? money(a.cpc, a.currency) : <span className="text-warn-text">missing</span>}</td>
+                <td className="text-right">{a.cpc ? Math.round(a.amount / a.cpc).toLocaleString("en-GB") : ""}</td>
+                <td className="text-right">{a.cvr != null ? `${a.cvr}%` : <span className="text-warn-text">missing</span>}</td>
                 <td className="text-muted">{a.note}</td>
                 <td>
                   <form action={deleteAdSpend}>
@@ -82,7 +93,7 @@ export default async function AdSpendPage() {
                 </td>
               </tr>
             ))}
-            {!rows.length && <tr><td colSpan={7} className="py-8 text-center text-muted">No ad spend entered yet.</td></tr>}
+            {!rows.length && <tr><td colSpan={10} className="py-8 text-center text-muted">No ad spend entered yet.</td></tr>}
           </tbody>
         </table>
       </div>

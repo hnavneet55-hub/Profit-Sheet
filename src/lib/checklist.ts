@@ -9,11 +9,12 @@ export type DayStatus = {
   adSpend: number; // in the ad account currency (summed; one account per store is assumed)
   adCurrency: string | null;
   adRows: number;
+  adNoCpc: number; // ad spend rows missing the CPC or the conversion rate
   refunds: number;
   sheetCogs: boolean; // the old profit sheet has a cost for this day
 };
 
-const blank = (): DayStatus => ({ orders: 0, invoiced: 0, missingCost: 0, adSpend: 0, adCurrency: null, adRows: 0, refunds: 0, sheetCogs: false });
+const blank = (): DayStatus => ({ orders: 0, invoiced: 0, missingCost: 0, adSpend: 0, adCurrency: null, adRows: 0, adNoCpc: 0, refunds: 0, sheetCogs: false });
 
 /** What has been entered for each store on each day: `status.get(storeId)!.get(date)`. */
 export async function dailyStatus(storeIds: number[], from: string, to: string): Promise<Map<number, Map<string, DayStatus>>> {
@@ -36,13 +37,15 @@ export async function dailyStatus(storeIds: number[], from: string, to: string):
     c.missingCost = Number(r.missing);
   }
   for (const r of await readOnlyQuery(`
-    select store_id, date::text as d, sum(amount) as amount, min(currency) as currency, count(*) as n
+    select store_id, date::text as d, sum(amount) as amount, min(currency) as currency, count(*) as n,
+      count(*) filter (where cpc is null or cpc <= 0 or cvr is null) as no_cpc
     from ad_spend where store_id is not null and date ${range} group by 1, 2`)) {
     const c = cell(r.store_id, r.d);
     if (!c) continue;
     c.adSpend = Number(r.amount);
     c.adCurrency = String(r.currency);
     c.adRows = Number(r.n);
+    c.adNoCpc = Number(r.no_cpc);
   }
   for (const r of await readOnlyQuery(`
     select store_id, date::text as d from sheet_days where cogs is not null and date ${range}`)) {

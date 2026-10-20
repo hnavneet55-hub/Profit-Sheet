@@ -26,7 +26,12 @@ async function accessToken(store: Store): Promise<string> {
       client_secret: decrypt(store.clientSecretEnc),
     }),
   });
-  if (!res.ok) throw new Error(`Shopify token request failed (${res.status}): ${await res.text()}`);
+  if (!res.ok) {
+    // Shopify answers with an HTML error page; keep just its message.
+    const body = await res.text();
+    const reason = body.match(/Oauth error [^<]+/)?.[0] ?? body.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim().slice(0, 200);
+    throw new Error(`Shopify token request failed (${res.status}): ${reason}`);
+  }
   const { access_token, expires_in } = (await res.json()) as { access_token: string; expires_in: number };
   tokenCache.set(store.id, { token: access_token, expiresAt: Date.now() + expires_in * 1000 });
   return access_token;

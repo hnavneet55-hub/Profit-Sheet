@@ -1,9 +1,10 @@
-// All reporting dates are calendar days in REPORT_TIMEZONE.
+// Reporting dates are calendar days in REPORT_TIMEZONE, except that a store's
+// orders and refunds fall on the day in the store's own time zone (as in Shopify).
 export const REPORT_TIMEZONE = process.env.REPORT_TIMEZONE ?? "Europe/Copenhagen";
 
-export function toReportDate(d: Date | string): string {
+export function toReportDate(d: Date | string, timeZone = REPORT_TIMEZONE): string {
   return new Intl.DateTimeFormat("en-CA", {
-    timeZone: REPORT_TIMEZONE,
+    timeZone,
     year: "numeric",
     month: "2-digit",
     day: "2-digit",

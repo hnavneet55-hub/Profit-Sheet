@@ -22,6 +22,7 @@ export const stores = pgTable("stores", {
   name: text("name").notNull(),
   shopDomain: text("shop_domain").notNull().unique(), // xxx.myshopify.com
   currency: text("currency"), // Shopify store currency, filled in on first sync
+  timezone: text("timezone"), // Shopify store time zone; orders fall on the day in this zone
   // Currency this store's sheet is reported in: the Google Ads account currency.
   reportingCurrency: text("reporting_currency").notNull().default("USD"),
   // "token": admin API access token (existing admin-created custom app)

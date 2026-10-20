@@ -58,7 +58,7 @@ export async function shopifyGraphql<T>(store: Store, query: string, variables: 
   }
 }
 
-type Money = { shopMoney: { amount: string; currencyCode?: string } };
+type Money = { shopMoney: { amount: string; currencyCode?: string }; presentmentMoney?: { amount: string } };
 
 export type ShopifyOrder = {
   id: string;
@@ -69,6 +69,7 @@ export type ShopifyOrder = {
   test: boolean;
   displayFinancialStatus: string | null;
   currencyCode: string;
+  presentmentCurrencyCode: string;
   subtotalPriceSet: Money;
   totalShippingPriceSet: Money;
   totalTaxSet: Money;
@@ -98,7 +99,7 @@ export type ShopifyOrder = {
 };
 
 export type OrdersPage = {
-  shop: { currencyCode: string };
+  shop: { currencyCode: string; ianaTimezone: string };
   orders: { pageInfo: { hasNextPage: boolean; endCursor: string | null }; nodes: ShopifyOrder[] };
 };
 
@@ -106,7 +107,7 @@ export type OrdersPage = {
 // to import orders older than 60 days).
 export const ORDERS_QUERY = /* GraphQL */ `
 query SyncOrders($first: Int!, $after: String, $query: String) {
-  shop { currencyCode }
+  shop { currencyCode ianaTimezone }
   orders(first: $first, after: $after, query: $query, sortKey: UPDATED_AT) {
     pageInfo { hasNextPage endCursor }
     nodes {
@@ -118,19 +119,20 @@ query SyncOrders($first: Int!, $after: String, $query: String) {
       test
       displayFinancialStatus
       currencyCode
+      presentmentCurrencyCode
       subtotalPriceSet { shopMoney { amount currencyCode } }
       totalShippingPriceSet { shopMoney { amount } }
-      totalTaxSet { shopMoney { amount } }
-      totalPriceSet { shopMoney { amount } }
+      totalTaxSet { shopMoney { amount } presentmentMoney { amount } }
+      totalPriceSet { shopMoney { amount } presentmentMoney { amount } }
       lineItems(first: 100) {
         nodes { id sku name quantity }
       }
       refunds(first: 50) {
         id
         createdAt
-        totalRefundedSet { shopMoney { amount } }
+        totalRefundedSet { shopMoney { amount } presentmentMoney { amount } }
         refundLineItems(first: 100) {
-          nodes { quantity restockType subtotalSet { shopMoney { amount } } lineItem { id sku name } }
+          nodes { quantity restockType subtotalSet { shopMoney { amount } presentmentMoney { amount } } lineItem { id sku name } }
         }
       }
       transactions(first: 50) {

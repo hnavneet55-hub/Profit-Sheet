@@ -15,11 +15,21 @@ const num = (s: string | undefined) => (s ? Number(s) : 0);
 
 async function saveOrder(store: Store, o: ShopifyOrder) {
   const db = await getDb();
-  const totalPrice = num(o.totalPriceSet.shopMoney.amount);
-  const totalTax = num(o.totalTaxSet.shopMoney.amount);
+  // When the customer paid in the store's report currency (the ad account's), use
+  // what they paid instead of converting the shop-currency amount back again.
+  const paidInReportCurrency = o.presentmentCurrencyCode === store.reportingCurrency && o.presentmentCurrencyCode !== o.currencyCode;
+  const amount = (m: { shopMoney: { amount: string }; presentmentMoney?: { amount: string } }) =>
+    num(paidInReportCurrency && m.presentmentMoney ? m.presentmentMoney.amount : m.shopMoney.amount);
+  const currency = paidInReportCurrency ? o.presentmentCurrencyCode : o.currencyCode;
+  const day = (d: string) => toReportDate(d, store.timezone ?? undefined);
+  const totalPrice = amount(o.totalPriceSet);
+  const totalTax = amount(o.totalTaxSet);
   const successful = o.transactions.filter((t) => t.status === "SUCCESS");
   const allFees = successful.flatMap((t) => t.fees);
-  const reportedFees = allFees.length ? allFees.reduce((s, f) => s + num(f.amount.amount), 0) : null;
+  // Shopify reports fees in shop currency; scale them like the order total.
+  const shopTotal = num(o.totalPriceSet.shopMoney.amount);
+  const feeScale = paidInReportCurrency && shopTotal ? totalPrice / shopTotal : 1;
+  const reportedFees = allFees.length ? allFees.reduce((s, f) => s + num(f.amount.amount), 0) * feeScale : null;
   const gateways = [...new Set(successful.map((t) => t.gateway).filter(Boolean))].join(",");
   // Voided/expired authorisations never captured money.
   const cancelled = !!o.cancelledAt || ["VOIDED", "EXPIRED"].includes(o.displayFinancialStatus ?? "");
@@ -29,8 +39,8 @@ async function saveOrder(store: Store, o: ShopifyOrder) {
     storeId: store.id,
     name: o.name,
     createdAt: new Date(o.createdAt),
-    orderDate: toReportDate(o.createdAt),
-    currency: o.currencyCode,
+    orderDate: day(o.createdAt),
+    currency,
     cancelled,
     totalPrice,
     totalTax,
@@ -56,15 +66,15 @@ async function saveOrder(store: Store, o: ShopifyOrder) {
 
   const taxShare = totalPrice > 0 ? (totalPrice - totalTax) / totalPrice : 1;
   for (const r of o.refunds) {
-    const amount = num(r.totalRefundedSet.shopMoney.amount);
+    const refunded = amount(r.totalRefundedSet);
     const values = {
       id: r.id,
       orderId: o.id,
       storeId: store.id,
       createdAt: new Date(r.createdAt),
-      refundDate: toReportDate(r.createdAt),
-      amount,
-      amountNet: amount * taxShare,
+      refundDate: day(r.createdAt),
+      amount: refunded,
+      amountNet: refunded * taxShare,
       restockedQty: r.refundLineItems.nodes.filter((n) => n.restockType !== "NO_RESTOCK").reduce((s, n) => s + n.quantity, 0),
     };
     const { id, ...set } = values;
@@ -79,7 +89,7 @@ async function saveOrder(store: Store, o: ShopifyOrder) {
           sku: (n.lineItem.sku || n.lineItem.name).trim(),
           name: n.lineItem.name,
           quantity: n.quantity,
-          subtotal: num(n.subtotalSet.shopMoney.amount),
+          subtotal: amount(n.subtotalSet),
           restockType: n.restockType,
         })),
       );
@@ -103,9 +113,10 @@ export async function syncStore(store: Store, deadline = Date.now() + TIME_BUDGE
   try {
     for (;;) {
       const page: OrdersPage = await shopifyGraphql<OrdersPage>(store, ORDERS_QUERY, { first: 50, after, query });
-      if (!store.currency) {
-        await db.update(schema.stores).set({ currency: page.shop.currencyCode }).where(eq(schema.stores.id, store.id));
+      if (store.currency !== page.shop.currencyCode || store.timezone !== page.shop.ianaTimezone) {
+        await db.update(schema.stores).set({ currency: page.shop.currencyCode, timezone: page.shop.ianaTimezone }).where(eq(schema.stores.id, store.id));
         store.currency = page.shop.currencyCode;
+        store.timezone = page.shop.ianaTimezone;
       }
       const saved: string[] = [];
       for (const o of page.orders.nodes) {

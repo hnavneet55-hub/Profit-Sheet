@@ -13,6 +13,8 @@ import { syncStores } from "@/lib/sync";
 import { applyQuoteItems, importQuote } from "@/lib/quotes";
 import { deleteInvoice, importInvoice, rematchInvoiceOrder, reviewInvoiceOrders } from "@/lib/invoices";
 import { inputFromForm } from "@/lib/supplier-files";
+import { importProfitSheet, parseProfitSheet, sheetTabs, undoProfitSheet, type ImportResult } from "@/lib/sheet-import";
+import { listStores } from "@/lib/stores";
 import { ask, type AskTurn, type AskResult } from "@/lib/ask";
 
 const str = (f: FormData, k: string) => String(f.get(k) ?? "").trim();
@@ -219,6 +221,79 @@ export async function removeInvoice(form: FormData) {
   await deleteInvoice(Number(str(form, "invoiceId")));
   revalidatePath("/", "layout");
   redirect("/invoices");
+}
+
+// ---- Business expenses ----
+
+export async function addExpense(form: FormData) {
+  const db = await getDb();
+  const monthly = form.get("monthly") === "on";
+  await db.insert(schema.expenses).values({
+    date: str(form, "date"),
+    category: str(form, "category") || "Other",
+    description: str(form, "description") || null,
+    amount: numOr(form, "amount"),
+    currency: str(form, "currency").toUpperCase() || "USD",
+    monthly,
+    until: monthly && str(form, "until") ? str(form, "until") : null,
+  });
+  revalidatePath("/", "layout");
+}
+
+export async function deleteExpense(form: FormData) {
+  const db = await getDb();
+  await db.delete(schema.expenses).where(eq(schema.expenses.id, Number(str(form, "id"))));
+  revalidatePath("/", "layout");
+}
+
+export async function stopExpense(form: FormData) {
+  // A monthly cost that ended: keep its history, stop it from the given date on.
+  const db = await getDb();
+  await db.update(schema.expenses).set({ until: str(form, "until") }).where(eq(schema.expenses.id, Number(str(form, "id"))));
+  revalidatePath("/", "layout");
+}
+
+// ---- Profit sheet import ----
+
+export type SheetImportState = { results: ImportResult[]; unmatched: string[]; error?: string } | null;
+
+const nameKey = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+
+export async function importSheet(_: SheetImportState, form: FormData): Promise<SheetImportState> {
+  const file = form.get("file");
+  if (!(file instanceof File) || !file.size) return { results: [], unmatched: [], error: "Choose a sheet to upload." };
+  const data = await file.arrayBuffer();
+  const year = Number(str(form, "year")) || undefined;
+  const storeId = Number(str(form, "storeId")) || null;
+  const withExpenses = form.get("expenses") === "on";
+  try {
+    const stores = await listStores();
+    const tabs = sheetTabs(data, file.name);
+    // One store chosen: its tab (by name) or the only/first tab. Otherwise every tab named after a store.
+    const pairs: [number, string | undefined][] = [];
+    const unmatched: string[] = [];
+    if (storeId) {
+      const store = stores.find((s) => s.id === storeId)!;
+      pairs.push([storeId, tabs.find((t) => nameKey(t) === nameKey(store.name)) ?? tabs[0]]);
+    } else {
+      for (const tab of tabs) {
+        const store = stores.find((s) => nameKey(s.name) === nameKey(tab));
+        if (store) pairs.push([store.id, tab]);
+        else unmatched.push(tab);
+      }
+    }
+    const results = [];
+    for (const [id, tab] of pairs) results.push(await importProfitSheet(id, parseProfitSheet(data, file.name, year, tab), withExpenses));
+    revalidatePath("/", "layout");
+    return { results, unmatched };
+  } catch (e) {
+    return { results: [], unmatched: [], error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+export async function undoSheetImport(form: FormData) {
+  await undoProfitSheet(Number(str(form, "storeId")));
+  revalidatePath("/", "layout");
 }
 
 // ---- Ask ----

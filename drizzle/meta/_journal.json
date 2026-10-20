@@ -15,6 +15,13 @@
       "when": 1792513114976,
       "tag": "0001_invoices",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1792516538037,
+      "tag": "0002_sheet_import_expenses",
+      "breakpoints": true
     }
   ]
 }

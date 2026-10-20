@@ -144,6 +144,7 @@ export const adSpend = pgTable(
     amount: doublePrecision("amount").notNull(),
     amountBase: doublePrecision("amount_base"),
     note: text("note"),
+    source: text("source").notNull().default("manual"), // manual | sheet (imported from a profit sheet)
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index("ad_spend_date_idx").on(t.date)],
@@ -230,6 +231,45 @@ export const invoiceOrders = pgTable(
     status: text("status").notNull().default("pending"), // pending | approved | rejected
   },
   (t) => [index("invoice_orders_order_idx").on(t.orderId), index("invoice_orders_invoice_idx").on(t.invoiceId)],
+);
+
+// Daily figures imported from a store's old profit sheet. They are kept for
+// comparison with what Shopify reports, and the sheet's cost of goods stands in
+// for days that no approved supplier invoice covers.
+export const sheetDays = pgTable(
+  "sheet_days",
+  {
+    storeId: integer("store_id").notNull().references(() => stores.id, { onDelete: "cascade" }),
+    date: date("date").notNull(),
+    currency: text("currency").notNull(),
+    revenue: doublePrecision("revenue"),
+    cogs: doublePrecision("cogs"), // null when the sheet had no cost for the day
+    cogsBase: doublePrecision("cogs_base"),
+    adSpend: doublePrecision("ad_spend"),
+    fees: doublePrecision("fees"),
+    profit: doublePrecision("profit"),
+    importedAt: timestamp("imported_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.storeId, t.date] })],
+);
+
+// Costs of the business as a whole (salaries, software, services), not of one store.
+// A monthly expense repeats on the same day of each month from `date` until `until`.
+export const expenses = pgTable(
+  "expenses",
+  {
+    id: serial("id").primaryKey(),
+    date: date("date").notNull(),
+    category: text("category").notNull(),
+    description: text("description"),
+    amount: doublePrecision("amount").notNull(),
+    currency: text("currency").notNull(),
+    monthly: boolean("monthly").notNull().default(false),
+    until: date("until"), // last date a monthly expense applies, null = ongoing
+    source: text("source").notNull().default("manual"), // manual | sheet
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("expenses_date_idx").on(t.date)],
 );
 
 export const settings = pgTable("settings", {

@@ -4,6 +4,7 @@ import { getDb, schema } from "@/db";
 import { BASE_CURRENCY } from "./config";
 import { rateFromBase } from "./fx";
 import { daysBetween } from "./dates";
+import { expensesByDay } from "./expenses";
 
 export type DayRow = {
   date: string;
@@ -18,6 +19,8 @@ export type DayRow = {
   orders: number;
   ordersMissingCogs: number;
   ordersInvoiced: number; // cost of goods from a supplier invoice, not the SKU estimate
+  ordersSheetCogs: number; // cost of goods from the old profit sheet (day not fully invoiced)
+  expenses: number; // business expenses (salaries, software…); all-stores view only
 };
 
 export type Ratios = {
@@ -53,6 +56,8 @@ const empty = (date: string): DayRow => ({
   orders: 0,
   ordersMissingCogs: 0,
   ordersInvoiced: 0,
+  ordersSheetCogs: 0,
+  expenses: 0,
 });
 
 export type Sheet = { currency: string; days: DayRow[]; total: DayRow };
@@ -61,6 +66,11 @@ export type Sheet = { currency: string; days: DayRow[]; total: DayRow };
  * Daily profit sheet for one store (in its reporting currency) or all stores
  * (in the base currency). Each day converts with that day's locked rate.
  * `inBase` keeps a single store's sheet in the base currency, for comparing stores.
+ *
+ * Cost of goods per store and day: supplier invoices when they cover every order
+ * of the day, otherwise the old profit sheet's figure if it has one, otherwise
+ * the orders' own costs (invoices plus SKU-cost estimates).
+ * Business expenses are only in the all-stores view, since they belong to no store.
  */
 export async function buildSheet(opts: { storeId?: number; from: string; to: string; inBase?: boolean }): Promise<Sheet> {
   const db = await getDb();
@@ -74,6 +84,7 @@ export async function buildSheet(opts: { storeId?: number; from: string; to: str
   );
   const orderRows = await db
     .select({
+      storeId: schema.orders.storeId,
       date: schema.orders.orderDate,
       gross: sql<number>`coalesce(sum(${schema.orders.netRevenueBase}), 0)`,
       cogs: sql<number>`coalesce(sum(${schema.orders.cogsBase}), 0)`,
@@ -84,16 +95,30 @@ export async function buildSheet(opts: { storeId?: number; from: string; to: str
     })
     .from(schema.orders)
     .where(orderWhere)
-    .groupBy(schema.orders.orderDate);
+    .groupBy(schema.orders.storeId, schema.orders.orderDate);
+  const sheetCogs = new Map(
+    (
+      await db
+        .select({ storeId: schema.sheetDays.storeId, date: schema.sheetDays.date, cogs: schema.sheetDays.cogsBase })
+        .from(schema.sheetDays)
+        .where(and(gte(schema.sheetDays.date, from), lte(schema.sheetDays.date, to), storeId ? eq(schema.sheetDays.storeId, storeId) : undefined))
+    )
+      .filter((r) => r.cogs != null)
+      .map((r) => [`${r.storeId}|${r.date}`, r.cogs!]),
+  );
   for (const r of orderRows) {
     const d = days.get(r.date);
     if (!d) continue;
-    d.gross = Number(r.gross);
-    d.cogs = Number(r.cogs);
-    d.fees = Number(r.fees);
-    d.orders = Number(r.orders);
-    d.ordersMissingCogs = Number(r.missing);
-    d.ordersInvoiced = Number(r.invoiced);
+    const orders = Number(r.orders);
+    const invoiced = Number(r.invoiced);
+    const fromSheet = invoiced < orders ? sheetCogs.get(`${r.storeId}|${r.date}`) : undefined;
+    d.gross += Number(r.gross);
+    d.cogs += fromSheet ?? Number(r.cogs);
+    d.fees += Number(r.fees);
+    d.orders += orders;
+    d.ordersMissingCogs += fromSheet != null ? 0 : Number(r.missing);
+    d.ordersInvoiced += invoiced;
+    d.ordersSheetCogs += fromSheet != null ? orders : 0;
   }
 
   const refundRows = await db
@@ -135,6 +160,13 @@ export async function buildSheet(opts: { storeId?: number; from: string; to: str
     d.mediaFee = Number(r.fee);
   }
 
+  if (!storeId) {
+    for (const [date, amount] of await expensesByDay(from, to)) {
+      const d = days.get(date);
+      if (d) d.expenses = amount;
+    }
+  }
+
   let currency = BASE_CURRENCY;
   if (storeId && !inBase) {
     const [store] = await db.select().from(schema.stores).where(eq(schema.stores.id, storeId));
@@ -149,8 +181,8 @@ export async function buildSheet(opts: { storeId?: number; from: string; to: str
       for (const f of money) d[f] *= k;
     }
     d.revenue = d.gross - d.refunds;
-    d.profit = d.revenue - d.cogs - d.adSpend - d.mediaFee - d.fees;
-    for (const f of [...money, "revenue", "profit", "orders", "ordersMissingCogs", "ordersInvoiced"] as const) total[f] += d[f];
+    d.profit = d.revenue - d.cogs - d.adSpend - d.mediaFee - d.fees - d.expenses;
+    for (const f of [...money, "expenses", "revenue", "profit", "orders", "ordersMissingCogs", "ordersInvoiced", "ordersSheetCogs"] as const) total[f] += d[f];
   }
   return { currency, days: [...days.values()], total };
 }

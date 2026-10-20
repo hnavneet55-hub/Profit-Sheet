@@ -30,7 +30,7 @@ export default async function DailyCheckPage(props: PageProps<"/daily">) {
     return {
       store: s,
       noAds: cells.filter((c) => c.orders > 0 && c.adRows === 0).length,
-      notInvoiced: cells.reduce((n, c) => n + c.orders - c.invoiced, 0),
+      notInvoiced: cells.reduce((n, c) => n + (c.sheetCogs && c.invoiced < c.orders ? 0 : c.orders - c.invoiced), 0),
       orders: cells.reduce((n, c) => n + c.orders, 0),
       pending: pendingBy.get(s.id) ?? 0,
     };
@@ -116,11 +116,13 @@ function Cell({ storeId, date, c }: { storeId: number; date: string; c: DayStatu
           <span className="text-muted">No orders</span>
         ) : c.invoiced === c.orders ? (
           <Link href={orders} className="text-positive hover:underline">✓ {c.orders} invoiced</Link>
+        ) : c.sheetCogs ? (
+          <Link href={orders} className="text-positive hover:underline" title="Cost of goods from the old profit sheet">✓ COG from sheet ({c.orders} orders)</Link>
         ) : (
           <Link href={`${orders}&invoiced=0`} className="text-warn-text hover:underline">{c.invoiced} of {c.orders} invoiced</Link>
         )}
       </div>
-      {c.missingCost > 0 && <Link href={`${orders}&missing=1`} className="block text-xs text-negative hover:underline">⚠ {c.missingCost} without any cost</Link>}
+      {c.missingCost > 0 && !c.sheetCogs && <Link href={`${orders}&missing=1`} className="block text-xs text-negative hover:underline">⚠ {c.missingCost} without any cost</Link>}
       {c.refunds > 0 && <div className="text-xs text-muted">{c.refunds} refund{c.refunds === 1 ? "" : "s"}</div>}
     </td>
   );

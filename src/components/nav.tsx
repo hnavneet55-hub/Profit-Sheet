@@ -10,10 +10,12 @@ const ITEMS = [
   { href: "/orders", label: "Orders" },
   { href: "/refunds", label: "Refunds" },
   { href: "/ad-spend", label: "Ad spend" },
+  { href: "/expenses", label: "Business expenses" },
   { href: "/products", label: "Products & costs" },
   { href: "/invoices", label: "Supplier invoices" },
   { href: "/quotes", label: "Supplier quotes" },
   { href: "/stores", label: "Stores" },
+  { href: "/import", label: "Import old sheets" },
 ];
 
 export function Nav() {

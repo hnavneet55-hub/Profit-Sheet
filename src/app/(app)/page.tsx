@@ -35,17 +35,18 @@ export default async function ProfitSheetPage(props: PageProps<"/">) {
   const visibleDays = sheet.days.filter((d) => d.date <= lastDay);
   const noAdDays = visibleDays.filter((d) => d.orders > 0 && d.adSpend === 0).length;
   const syncErrors = stores.filter((s) => s.active && s.lastSyncError);
-  const notInvoiced = t.orders - t.ordersInvoiced;
+  // Orders whose day takes its cost from the old profit sheet don't need an invoice.
+  const notInvoiced = t.orders - t.ordersInvoiced - t.ordersSheetCogs;
   const span = sp.span === "ytd" || sp.span === "all" ? sp.span : "month";
   const qs = (m: string, s?: number, sp2 = span) => `/?month=${m}${s ? `&store=${s}` : ""}${sp2 !== "month" ? `&span=${sp2}` : ""}`;
 
   const kpis = [
     { label: "Revenue", value: money(t.revenue, cur), sub: `after ${money(t.refunds, cur)} refunds` },
-    { label: "Profit", value: money(t.profit, cur), sub: `${pct(tr.profitPct)} of gross`, tone: t.profit < 0 ? "neg" : undefined },
+    { label: storeId ? "Profit" : "Net profit", value: money(t.profit, cur), sub: storeId ? `${pct(tr.profitPct)} of gross` : `after ${money(t.expenses, cur)} business expenses`, tone: t.profit < 0 ? "neg" : undefined },
     { label: "Ad spend", value: money(t.adSpend, cur), sub: `+ ${money(t.mediaFee, cur)} media buyer fee` },
     { label: "ROAS", value: ratio(tr.roas), sub: `gross ${ratio(tr.grossRoas)}` },
     { label: "POAS", value: ratio(tr.poas), sub: "profit ÷ ad spend" },
-    { label: "Orders", value: t.orders.toLocaleString("en-GB"), sub: `${t.ordersInvoiced} invoiced · COGS ${pct(tr.cogsPct)}` },
+    { label: "Orders", value: t.orders.toLocaleString("en-GB"), sub: `${t.ordersInvoiced} invoiced${t.ordersSheetCogs ? ` · ${t.ordersSheetCogs} sheet COG` : ""} · COGS ${pct(tr.cogsPct)}` },
   ];
 
   return (
@@ -90,7 +91,7 @@ export default async function ProfitSheetPage(props: PageProps<"/">) {
           )}
           {notInvoiced > 0 && (
             <p>
-              {notInvoiced} of {t.orders} orders aren&apos;t covered by a supplier invoice yet, so their cost of goods is the SKU-cost estimate.{" "}
+              {notInvoiced} of {t.orders} orders aren&apos;t covered by a supplier invoice or the old profit sheet yet, so their cost of goods is the SKU-cost estimate.{" "}
               <Link className="underline" href="/daily">Daily check</Link> · <Link className="underline" href="/invoices">Upload invoices</Link>
             </p>
           )}
@@ -127,14 +128,14 @@ export default async function ProfitSheetPage(props: PageProps<"/">) {
       <StoreBreakdown month={month} span={span} selected={storeId} stores={stores} link={(sp2) => qs(month, storeId, sp2)} />
 
       <section className="card overflow-x-auto">
-        <SheetTable days={sheet.days} total={t} currency={cur} month={month} lastDay={lastDay} />
+        <SheetTable days={sheet.days} total={t} currency={cur} month={month} lastDay={lastDay} withExpenses={!storeId} />
       </section>
     </div>
   );
 }
 
-function SheetTable({ days, total, currency, month, lastDay }: { days: DayRow[]; total: DayRow; currency: string; month: string; lastDay: string }) {
-  const cols = ["Date", "Gross revenue", "Refunds", "Revenue", "Cost of goods", "Ad spend", "Media buyer fee", "Transaction fees", "Profit", "ROAS", "Gross ROAS", "Profit %", "COG %", "POAS"];
+function SheetTable({ days, total, currency, month, lastDay, withExpenses }: { days: DayRow[]; total: DayRow; currency: string; month: string; lastDay: string; withExpenses: boolean }) {
+  const cols = ["Date", "Gross revenue", "Refunds", "Revenue", "Cost of goods", "Ad spend", "Media buyer fee", "Transaction fees", ...(withExpenses ? ["Business expenses"] : []), "Profit", "ROAS", "Gross ROAS", "Profit %", "COG %", "POAS"];
   const row = (d: DayRow, label: string, isTotal = false) => {
     const r = ratios(d);
     const empty = !isTotal && d.date > lastDay;
@@ -145,10 +146,11 @@ function SheetTable({ days, total, currency, month, lastDay }: { days: DayRow[];
         <td>{m(d.gross)}</td>
         <td>{m(d.refunds)}</td>
         <td>{m(d.revenue)}</td>
-        <td>{m(d.cogs)}{!empty && d.ordersMissingCogs > 0 && <span title={`${d.ordersMissingCogs} orders missing a cost`} className="ml-1 text-warn-text">⚠</span>}</td>
+        <td>{m(d.cogs)}{!empty && d.ordersSheetCogs > 0 && !isTotal && <span title="Cost of goods from the old profit sheet" className="ml-1 text-xs text-muted">sheet</span>}{!empty && d.ordersMissingCogs > 0 && <span title={`${d.ordersMissingCogs} orders missing a cost`} className="ml-1 text-warn-text">⚠</span>}</td>
         <td>{m(d.adSpend)}</td>
         <td>{m(d.mediaFee)}</td>
         <td>{m(d.fees)}</td>
+        {withExpenses && <td>{d.expenses ? m(d.expenses) : ""}</td>}
         <td className={`font-semibold ${d.profit < 0 ? "text-negative" : ""}`}>{m(d.profit)}</td>
         <td>{empty ? "" : ratio(r.roas)}</td>
         <td>{empty ? "" : ratio(r.grossRoas)}</td>
@@ -224,6 +226,14 @@ async function StoreBreakdown({ month, span, selected, stores, link }: {
         <tbody>
           {rows.map(({ store, t }) =>
             line(store.id, <Link className="font-medium hover:underline" href={`/?month=${month}&store=${store.id}`}>{store.name}</Link>, t, store.id === selected ? "bg-accent-soft" : ""),
+          )}
+          {sum.expenses > 0 && (
+            <tr>
+              <td className="text-left">Business expenses <Link href="/expenses" className="text-xs text-muted underline">details</Link></td>
+              <td colSpan={5}></td>
+              <td className="text-negative">−{money(sum.expenses, BASE_CURRENCY)}</td>
+              <td colSpan={3}></td>
+            </tr>
           )}
           {line("total", "Whole business", sum, "border-t-2 border-border font-semibold")}
         </tbody>

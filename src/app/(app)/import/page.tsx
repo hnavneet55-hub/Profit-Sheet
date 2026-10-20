@@ -50,17 +50,19 @@ export default async function ImportPage() {
             </thead>
             <tbody>
               {rows.map(({ r, store, live }) => {
+                // Shopify figures are in the store's report currency; the sheet's in whatever it used.
                 const cur = store?.reportingCurrency ?? String(r.currency);
+                const sheetCur = String(r.currency);
                 return (
                   <tr key={`${r.store_id}-${r.month}`}>
                     <td>{store?.name}</td>
                     <td>{monthLabel(String(r.month))}</td>
-                    <td className="r">{money(Number(r.revenue), cur)}</td>
+                    <td className="r">{money(Number(r.revenue), sheetCur)}</td>
                     <td className="r">{money(live.revenue, cur)}</td>
-                    <td className={`r ${Math.abs(live.revenue - Number(r.revenue)) > Math.abs(Number(r.revenue)) * 0.05 ? "text-warn-text" : "text-muted"}`}>{diff(live.revenue, Number(r.revenue))}</td>
+                    <td className={`r ${Math.abs(live.revenue - Number(r.revenue)) > Math.abs(Number(r.revenue)) * 0.05 ? "text-warn-text" : "text-muted"}`}>{sheetCur === cur ? diff(live.revenue, Number(r.revenue)) : "other currency"}</td>
                     <td className="r">{money(Number(r.ad_spend), cur)}</td>
                     <td className="r">{money(Number(r.cogs), String(r.currency))}</td>
-                    <td className="r">{money(Number(r.profit), cur)}</td>
+                    <td className="r">{money(Number(r.profit), sheetCur)}</td>
                     <td className={`r font-medium ${live.profit < 0 ? "text-negative" : ""}`}>{money(live.profit, cur)}</td>
                   </tr>
                 );

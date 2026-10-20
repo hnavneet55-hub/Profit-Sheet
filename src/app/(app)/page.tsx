@@ -37,12 +37,12 @@ export default async function ProfitSheetPage(props: PageProps<"/">) {
   const noAdDays = visibleDays.filter((d) => d.orders > 0 && d.adSpend === 0).length;
   const syncErrors = stores.filter((s) => s.active && s.lastSyncError);
   // Orders whose day takes its cost from the old profit sheet don't need an invoice.
-  // Orders with no cost at all: no invoice, no sheet COG and no SKU cost. Older ones are ignored.
+  // Orders counted one by one (after the old sheet ends) with no cost at all: no invoice and no SKU cost. Older ones are ignored.
   const costCutoff = addDays(today(), -MISSING_COST_DAYS);
   const missingDays = visibleDays.filter((d) => d.ordersMissingCogs > 0 && d.date >= costCutoff);
   const missingCost = missingDays.reduce((n, d) => n + d.ordersMissingCogs, 0);
   // The rest of the not-invoiced orders use the SKU-cost estimate.
-  const estimated = t.orders - t.ordersInvoiced - t.ordersSheetCogs - t.ordersMissingCogs;
+  const estimated = t.orders - t.ordersDayWise - t.ordersInvoiced - t.ordersMissingCogs;
   const span = sp.span === "ytd" || sp.span === "all" ? sp.span : "month";
   const qs = (m: string, s?: number, sp2 = span) => `/?month=${m}${s ? `&store=${s}` : ""}${sp2 !== "month" ? `&span=${sp2}` : ""}`;
 
@@ -52,7 +52,7 @@ export default async function ProfitSheetPage(props: PageProps<"/">) {
     { label: "Ad spend", value: money(t.adSpend, cur), sub: `+ ${money(t.mediaFee, cur)} media buyer fee` },
     { label: "ROAS", value: ratio(tr.roas), sub: `gross ${ratio(tr.grossRoas)} · CPC ${ta.cpc == null ? "—" : money(ta.cpc, cur)} · CVR ${pct(ta.cvr)}` },
     { label: "POAS", value: ratio(tr.poas), sub: "profit ÷ ad spend" },
-    { label: "Orders", value: t.orders.toLocaleString("en-GB"), sub: `${t.ordersInvoiced} invoiced${t.ordersSheetCogs ? ` · ${t.ordersSheetCogs} sheet COG` : ""} · COGS ${pct(tr.cogsPct)}` },
+    { label: "Orders", value: t.orders.toLocaleString("en-GB"), sub: `${t.ordersDayWise ? `${t.ordersDayWise} costed by day (old sheet) · ` : ""}${t.ordersInvoiced} of ${t.orders - t.ordersDayWise} invoiced · COGS ${pct(tr.cogsPct)}` },
   ];
 
   return (
@@ -92,13 +92,13 @@ export default async function ProfitSheetPage(props: PageProps<"/">) {
           {missingCost > 0 && (
             <p>
               ⚠ {missingCost} order{missingCost === 1 ? "" : "s"} from {shortDate(missingDays[0].date)}
-              {missingDays.length > 1 ? ` – ${shortDate(missingDays.at(-1)!.date)}` : ""} {missingCost === 1 ? "has" : "have"} no cost of goods yet: no supplier invoice, and the old profit sheet doesn&apos;t cover {missingDays.length > 1 ? "those days" : "that day"}. Their cost counts as 0, so profit is overstated until the invoices are uploaded.{" "}
+              {missingDays.length > 1 ? ` – ${shortDate(missingDays.at(-1)!.date)}` : ""} {missingCost === 1 ? "has" : "have"} no cost of goods yet: they&apos;re after the old profit sheet ends, so they&apos;re costed order by order, and there&apos;s no supplier invoice for them yet. Their cost counts as 0, so profit is overstated until the invoices are uploaded.{" "}
               <Link className="underline" href="/invoices">Upload invoices</Link> · <Link className="underline" href={`/orders?from=${missingDays[0].date}&to=${missingDays.at(-1)!.date}&missing=1${storeId ? `&store=${storeId}` : ""}`}>See the orders</Link>
             </p>
           )}
           {estimated > 0 && (
             <p>
-              {estimated} of {t.orders} orders aren&apos;t covered by a supplier invoice or the old profit sheet yet, so their cost of goods is the SKU-cost estimate.{" "}
+              {estimated} of {t.orders} orders aren&apos;t covered by a supplier invoice yet, so their cost of goods is the SKU-cost estimate.{" "}
               <Link className="underline" href="/daily">Daily check</Link> · <Link className="underline" href="/invoices">Upload invoices</Link>
             </p>
           )}
@@ -209,7 +209,7 @@ async function StoreBreakdown({ month, span, selected, stores, link }: {
         <td className="text-left">{label}</td>
         <td>{d.orders.toLocaleString("en-GB")}</td>
         <td>{money(d.revenue, BASE_CURRENCY)}</td>
-        <td>{money(d.cogs, BASE_CURRENCY)}<span className="ml-1 text-xs text-muted">{d.orders ? `${Math.round((d.ordersInvoiced / d.orders) * 100)}% inv.` : ""}</span></td>
+        <td>{money(d.cogs, BASE_CURRENCY)}<span className="ml-1 text-xs text-muted">{d.orders > d.ordersDayWise ? `${Math.round((d.ordersInvoiced / (d.orders - d.ordersDayWise)) * 100)}% inv.` : d.orders ? "sheet" : ""}</span></td>
         <td>{money(d.adSpend + d.mediaFee, BASE_CURRENCY)}</td>
         <td>{money(d.fees, BASE_CURRENCY)}</td>
         <td className={`font-semibold ${d.profit < 0 ? "text-negative" : "text-positive"}`}>{money(d.profit, BASE_CURRENCY)}</td>

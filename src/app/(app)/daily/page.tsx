@@ -32,8 +32,9 @@ export default async function DailyCheckPage(props: PageProps<"/daily">) {
       store: s,
       noAds: cells.filter((c) => c.orders > 0 && c.adRows === 0).length,
       noCpc: cells.filter((c) => c.adNoCpc > 0).length,
-      notInvoiced: cells.reduce((n, c) => n + (c.sheetCogs && c.invoiced < c.orders ? 0 : c.orders - c.invoiced), 0),
-      orders: cells.reduce((n, c) => n + c.orders, 0),
+      notInvoiced: cells.reduce((n, c) => n + (c.dayWise ? 0 : c.orders - c.invoiced), 0),
+      orders: cells.reduce((n, c) => n + (c.dayWise ? 0 : c.orders), 0),
+      dayWise: cells.some((c) => c.dayWise && c.orders > 0),
       pending: pendingBy.get(s.id) ?? 0,
     };
   });
@@ -58,7 +59,7 @@ export default async function DailyCheckPage(props: PageProps<"/daily">) {
       {!stores.length && <p className="text-sm text-muted">No active stores. <Link className="underline" href="/stores/new">Add a store</Link>.</p>}
 
       <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        {summary.map(({ store, noAds, noCpc, notInvoiced, orders, pending }) => {
+        {summary.map(({ store, noAds, noCpc, notInvoiced, orders, dayWise, pending }) => {
           const ok = !noAds && !noCpc && !notInvoiced && !pending && !store.lastSyncError;
           return (
             <div key={store.id} className="card space-y-1 px-4 py-3 text-sm">
@@ -69,7 +70,7 @@ export default async function DailyCheckPage(props: PageProps<"/daily">) {
               <div className={noAds ? "text-negative" : "text-muted"}>{noAds ? `${noAds} day${noAds === 1 ? "" : "s"} without ad spend` : "Ad spend entered every day"}</div>
               {noCpc > 0 && <div className="text-warn-text">{noCpc} day{noCpc === 1 ? "" : "s"} without CPC or CVR</div>}
               <div className={notInvoiced ? "text-warn-text" : "text-muted"}>
-                {orders === 0 ? "No orders" : notInvoiced ? `${notInvoiced} of ${orders} orders not invoiced` : `All ${orders} orders invoiced`}
+                {orders === 0 ? (dayWise ? "Cost of goods from the old sheet" : "No orders") : notInvoiced ? `${notInvoiced} of ${orders} orders not invoiced` : `All ${orders} orders invoiced`}
               </div>
               {pending > 0 && <Link href={`/invoices?store=${store.id}`} className="block text-accent underline">{pending} invoice{pending === 1 ? "" : "s"} waiting for review</Link>}
               {store.lastSyncError ? (
@@ -102,7 +103,7 @@ export default async function DailyCheckPage(props: PageProps<"/daily">) {
           </table>
         </div>
       )}
-      <p className="text-xs text-muted">Invoices usually arrive a few days after the orders, so recent days are expected to be partly invoiced. Orders not invoiced yet use the SKU-cost estimate.</p>
+      <p className="text-xs text-muted">Days up to the end of the old profit sheet use its daily cost of goods; orders after that are matched to supplier invoices one by one. Invoices usually arrive a few days after the orders, so recent days are expected to be partly invoiced. Orders not invoiced yet use the SKU-cost estimate.</p>
     </div>
   );
 }
@@ -118,15 +119,19 @@ function Cell({ storeId, date, c }: { storeId: number; date: string; c: DayStatu
       <div>
         {c.orders === 0 ? (
           <span className="text-muted">No orders</span>
+        ) : c.dayWise ? (
+          c.sheetCogs ? (
+            <Link href={orders} className="text-positive hover:underline" title="Costed per day from the old profit sheet">✓ COG from sheet ({c.orders} orders)</Link>
+          ) : (
+            <Link href={orders} className="text-muted hover:underline" title="The old profit sheet has no cost of goods for this day">Old sheet: no COG ({c.orders} orders)</Link>
+          )
         ) : c.invoiced === c.orders ? (
           <Link href={orders} className="text-positive hover:underline">✓ {c.orders} invoiced</Link>
-        ) : c.sheetCogs ? (
-          <Link href={orders} className="text-positive hover:underline" title="Cost of goods from the old profit sheet">✓ COG from sheet ({c.orders} orders)</Link>
         ) : (
           <Link href={`${orders}&invoiced=0`} className="text-warn-text hover:underline">{c.invoiced} of {c.orders} invoiced</Link>
         )}
       </div>
-      {c.missingCost > 0 && !c.sheetCogs && date >= addDays(today(), -MISSING_COST_DAYS) && <Link href={`${orders}&missing=1`} className="block text-xs text-negative hover:underline">⚠ {c.missingCost} without any cost</Link>}
+      {c.missingCost > 0 && !c.dayWise && date >= addDays(today(), -MISSING_COST_DAYS) && <Link href={`${orders}&missing=1`} className="block text-xs text-negative hover:underline">⚠ {c.missingCost} without any cost</Link>}
       {c.refunds > 0 && <div className="text-xs text-muted">{c.refunds} refund{c.refunds === 1 ? "" : "s"}</div>}
     </td>
   );

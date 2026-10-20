@@ -18,8 +18,9 @@ export type DayRow = {
   profit: number;
   orders: number;
   ordersMissingCogs: number;
-  ordersInvoiced: number; // cost of goods from a supplier invoice, not the SKU estimate
-  ordersSheetCogs: number; // cost of goods from the old profit sheet (day not fully invoiced)
+  ordersInvoiced: number; // counted per order, cost of goods from a supplier invoice
+  ordersDayWise: number; // on a day up to the end of the old profit sheet, costed per day not per order
+  ordersSheetCogs: number; // of those, on a day the old sheet has a cost of goods for
   expenses: number; // business expenses (salaries, software…); all-stores view only
   clicks: number; // ad spend ÷ CPC, where a CPC was entered
   clickSpend: number; // the ad spend those clicks came from (for the CPC)
@@ -60,6 +61,7 @@ const empty = (date: string): DayRow => ({
   orders: 0,
   ordersMissingCogs: 0,
   ordersInvoiced: 0,
+  ordersDayWise: 0,
   ordersSheetCogs: 0,
   expenses: 0,
   clicks: 0,
@@ -80,9 +82,10 @@ export type Sheet = { currency: string; days: DayRow[]; total: DayRow };
  * (in the base currency). Each day converts with that day's locked rate.
  * `inBase` keeps a single store's sheet in the base currency, for comparing stores.
  *
- * Cost of goods per store and day: supplier invoices when they cover every order
- * of the day, otherwise the old profit sheet's figure if it has one, otherwise
- * the orders' own costs (invoices plus SKU-cost estimates).
+ * Cost of goods per store and day: up to the last day the old profit sheet has a
+ * cost of goods for, the sheet's daily figure (that's how it was collected; days
+ * it left blank fall back to the orders' own costs, unflagged). After that, the
+ * orders' own costs: supplier invoices, else SKU-cost estimates.
  * Business expenses are only in the all-stores view, since they belong to no store.
  */
 export async function buildSheet(opts: { storeId?: number; from: string; to: string; inBase?: boolean }): Promise<Sheet> {
@@ -119,20 +122,23 @@ export async function buildSheet(opts: { storeId?: number; from: string; to: str
       .filter((r) => r.cogs != null)
       .map((r) => [`${r.storeId}|${r.date}`, r.cogs!]),
   );
+  const dayWiseUntil = await sheetCogsUntil();
   const ordersByStoreDay = new Map<string, number>();
   for (const r of orderRows) {
     const d = days.get(r.date);
     if (!d) continue;
     const orders = Number(r.orders);
     ordersByStoreDay.set(`${r.storeId}|${r.date}`, orders);
-    const invoiced = Number(r.invoiced);
-    const fromSheet = invoiced < orders ? sheetCogs.get(`${r.storeId}|${r.date}`) : undefined;
+    const until = dayWiseUntil.get(r.storeId);
+    const dayWise = until != null && r.date <= until;
+    const fromSheet = dayWise ? sheetCogs.get(`${r.storeId}|${r.date}`) : undefined;
     d.gross += Number(r.gross);
     d.cogs += fromSheet ?? Number(r.cogs);
     d.fees += Number(r.fees);
     d.orders += orders;
-    d.ordersMissingCogs += fromSheet != null ? 0 : Number(r.missing);
-    d.ordersInvoiced += invoiced;
+    d.ordersMissingCogs += dayWise ? 0 : Number(r.missing);
+    d.ordersInvoiced += dayWise ? 0 : Number(r.invoiced);
+    d.ordersDayWise += dayWise ? orders : 0;
     d.ordersSheetCogs += fromSheet != null ? orders : 0;
   }
 
@@ -211,8 +217,19 @@ export async function buildSheet(opts: { storeId?: number; from: string; to: str
     }
     d.revenue = d.gross - d.refunds;
     d.profit = d.revenue - d.cogs - d.adSpend - d.mediaFee - d.fees - d.expenses;
-    for (const f of [...money, "expenses", "revenue", "profit", "orders", "ordersMissingCogs", "ordersInvoiced", "ordersSheetCogs", "clicks", "clickOrders"] as const) total[f] += d[f];
+    for (const f of [...money, "expenses", "revenue", "profit", "orders", "ordersMissingCogs", "ordersInvoiced", "ordersDayWise", "ordersSheetCogs", "clicks", "clickOrders"] as const) total[f] += d[f];
     total.cvrCalculated ||= d.cvrCalculated;
   }
   return { currency, days: [...days.values()], total };
+}
+
+/** Per store, the last day the old profit sheet has a cost of goods for; days up to it are costed per day. */
+export async function sheetCogsUntil(): Promise<Map<number, string>> {
+  const db = await getDb();
+  const rows = await db
+    .select({ storeId: schema.sheetDays.storeId, until: sql<string>`max(${schema.sheetDays.date})::text` })
+    .from(schema.sheetDays)
+    .where(sql`${schema.sheetDays.cogs} is not null`)
+    .groupBy(schema.sheetDays.storeId);
+  return new Map(rows.map((r) => [r.storeId, r.until]));
 }

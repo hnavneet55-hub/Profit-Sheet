@@ -31,7 +31,7 @@ export default async function ImportPage() {
       <header>
         <h1 className="text-xl font-semibold">Import old profit sheets</h1>
         <p className="text-sm text-muted">
-          Brings in each store&apos;s past ad spend, and its cost of goods for days no supplier invoice covers. Revenue, refunds and fees always come from Shopify; the table below compares them with the sheet. Importing again replaces the earlier import.
+          Brings in each store&apos;s past ad spend, and its daily cost of goods: every day up to the sheet's last cost of goods entry is costed per day from the sheet; orders after that are costed one by one from supplier invoices. Revenue, refunds and fees always come from Shopify; the table below compares them with the sheet. Importing again replaces the earlier import.
         </p>
       </header>
 

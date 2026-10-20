@@ -8,6 +8,7 @@ import { CLAUDE_MODEL } from "./config";
 import { recomputeOrders } from "./costs";
 import { toBase } from "./fx";
 import { today } from "./dates";
+import { sheetCogsUntil } from "./report";
 import { supplierContent, type SupplierInput } from "./supplier-files";
 
 // Flag an order when the invoice differs this much from the SKU-cost estimate.
@@ -135,6 +136,9 @@ async function checkOrder(
   const lines = await db.select().from(schema.orderLines).where(eq(schema.orderLines.orderId, orderId));
   if (order.cancelled) flags.push("Order was cancelled: check the supplier should have billed it");
   if (invoiceDate && invoiceDate < order.orderDate) flags.push(`Invoice is dated before the order (${order.orderDate})`);
+  const sheetUntil = (await sheetCogsUntil()).get(order.storeId);
+  if (sheetUntil && order.orderDate <= sheetUntil)
+    flags.push(`Order is from ${order.orderDate}, which the old profit sheet covers (until ${sheetUntil}): that day's cost of goods stays the sheet's figure`);
 
   const others = await db
     .select({ invoiceId: schema.invoiceOrders.invoiceId, number: schema.supplierInvoices.invoiceNumber })

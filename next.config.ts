@@ -1,9 +1,14 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
-  cacheComponents: true,
-  partialPrefetching: true,
+  // Embedded Postgres for local development; loaded at runtime, not bundled.
+  serverExternalPackages: ["@electric-sql/pglite"],
+  experimental: {
+    serverActions: {
+      // Supplier sheets and screenshots are uploaded through a Server Action.
+      bodySizeLimit: "4mb",
+    },
+  },
   turbopack: {
     rules: {
       "*.css": {

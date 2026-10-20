@@ -2,9 +2,9 @@ import Link from "next/link";
 import { adStats, buildSheet, ratios, type DayRow } from "@/lib/report";
 import { readOnlyQuery } from "@/db";
 import { listStores } from "@/lib/stores";
-import { today } from "@/lib/dates";
+import { addDays, today } from "@/lib/dates";
 import { money, pct, ratio, monthLabel, shortDate } from "@/lib/format";
-import { BASE_CURRENCY } from "@/lib/config";
+import { BASE_CURRENCY, MISSING_COST_DAYS } from "@/lib/config";
 import { ProfitChart } from "@/components/profit-chart";
 import { syncNow } from "../actions";
 
@@ -37,7 +37,12 @@ export default async function ProfitSheetPage(props: PageProps<"/">) {
   const noAdDays = visibleDays.filter((d) => d.orders > 0 && d.adSpend === 0).length;
   const syncErrors = stores.filter((s) => s.active && s.lastSyncError);
   // Orders whose day takes its cost from the old profit sheet don't need an invoice.
-  const notInvoiced = t.orders - t.ordersInvoiced - t.ordersSheetCogs;
+  // Orders with no cost at all: no invoice, no sheet COG and no SKU cost. Older ones are ignored.
+  const costCutoff = addDays(today(), -MISSING_COST_DAYS);
+  const missingDays = visibleDays.filter((d) => d.ordersMissingCogs > 0 && d.date >= costCutoff);
+  const missingCost = missingDays.reduce((n, d) => n + d.ordersMissingCogs, 0);
+  // The rest of the not-invoiced orders use the SKU-cost estimate.
+  const estimated = t.orders - t.ordersInvoiced - t.ordersSheetCogs - t.ordersMissingCogs;
   const span = sp.span === "ytd" || sp.span === "all" ? sp.span : "month";
   const qs = (m: string, s?: number, sp2 = span) => `/?month=${m}${s ? `&store=${s}` : ""}${sp2 !== "month" ? `&span=${sp2}` : ""}`;
 
@@ -79,20 +84,21 @@ export default async function ProfitSheetPage(props: PageProps<"/">) {
         </div>
       </header>
 
-      {(t.ordersMissingCogs > 0 || noAdDays > 0 || notInvoiced > 0 || syncErrors.length > 0 || stores.length === 0) && (
+      {(missingCost > 0 || noAdDays > 0 || estimated > 0 || syncErrors.length > 0 || stores.length === 0) && (
         <div className="space-y-1 rounded-lg bg-warn-bg px-4 py-3 text-sm text-warn-text">
           {stores.length === 0 && (
             <p>No stores connected yet. <Link className="underline" href="/stores/new">Add your first store</Link>.</p>
           )}
-          {t.ordersMissingCogs > 0 && (
+          {missingCost > 0 && (
             <p>
-              ⚠ {t.ordersMissingCogs} order{t.ordersMissingCogs === 1 ? " has" : "s have"} products without a cost, so profit is overstated.{" "}
-              <Link className="underline" href="/products?missing=1">Add costs</Link>
+              ⚠ {missingCost} order{missingCost === 1 ? "" : "s"} from {shortDate(missingDays[0].date)}
+              {missingDays.length > 1 ? ` – ${shortDate(missingDays.at(-1)!.date)}` : ""} {missingCost === 1 ? "has" : "have"} no cost of goods yet: no supplier invoice, and the old profit sheet doesn&apos;t cover {missingDays.length > 1 ? "those days" : "that day"}. Their cost counts as 0, so profit is overstated until the invoices are uploaded.{" "}
+              <Link className="underline" href="/invoices">Upload invoices</Link> · <Link className="underline" href={`/orders?from=${missingDays[0].date}&to=${missingDays.at(-1)!.date}&missing=1${storeId ? `&store=${storeId}` : ""}`}>See the orders</Link>
             </p>
           )}
-          {notInvoiced > 0 && (
+          {estimated > 0 && (
             <p>
-              {notInvoiced} of {t.orders} orders aren&apos;t covered by a supplier invoice or the old profit sheet yet, so their cost of goods is the SKU-cost estimate.{" "}
+              {estimated} of {t.orders} orders aren&apos;t covered by a supplier invoice or the old profit sheet yet, so their cost of goods is the SKU-cost estimate.{" "}
               <Link className="underline" href="/daily">Daily check</Link> · <Link className="underline" href="/invoices">Upload invoices</Link>
             </p>
           )}
@@ -129,13 +135,13 @@ export default async function ProfitSheetPage(props: PageProps<"/">) {
       <StoreBreakdown month={month} span={span} selected={storeId} stores={stores} link={(sp2) => qs(month, storeId, sp2)} />
 
       <section className="card overflow-x-auto">
-        <SheetTable days={sheet.days} total={t} currency={cur} month={month} lastDay={lastDay} withExpenses={!storeId} />
+        <SheetTable days={sheet.days} total={t} currency={cur} month={month} lastDay={lastDay} withExpenses={!storeId} costCutoff={costCutoff} missingCost={missingCost} />
       </section>
     </div>
   );
 }
 
-function SheetTable({ days, total, currency, month, lastDay, withExpenses }: { days: DayRow[]; total: DayRow; currency: string; month: string; lastDay: string; withExpenses: boolean }) {
+function SheetTable({ days, total, currency, month, lastDay, withExpenses, costCutoff, missingCost }: { days: DayRow[]; total: DayRow; currency: string; month: string; lastDay: string; withExpenses: boolean; costCutoff: string; missingCost: number }) {
   const cols = ["Date", "Gross revenue", "Refunds", "Revenue", "Cost of goods", "Ad spend", "Media buyer fee", "Transaction fees", ...(withExpenses ? ["Business expenses"] : []), "Profit", "ROAS", "Gross ROAS", "Profit %", "COG %", "POAS", "CPC", "CVR %"];
   const row = (d: DayRow, label: string, isTotal = false) => {
     const r = ratios(d);
@@ -148,7 +154,7 @@ function SheetTable({ days, total, currency, month, lastDay, withExpenses }: { d
         <td>{m(d.gross)}</td>
         <td>{m(d.refunds)}</td>
         <td>{m(d.revenue)}</td>
-        <td>{m(d.cogs)}{!empty && d.ordersSheetCogs > 0 && !isTotal && <span title="Cost of goods from the old profit sheet" className="ml-1 text-xs text-muted">sheet</span>}{!empty && d.ordersMissingCogs > 0 && <span title={`${d.ordersMissingCogs} orders missing a cost`} className="ml-1 text-warn-text">⚠</span>}</td>
+        <td>{m(d.cogs)}{!empty && d.ordersSheetCogs > 0 && !isTotal && <span title="Cost of goods from the old profit sheet" className="ml-1 text-xs text-muted">sheet</span>}{!empty && d.ordersMissingCogs > 0 && (isTotal ? missingCost > 0 : d.date >= costCutoff) && <span title={`${isTotal ? missingCost : d.ordersMissingCogs} orders without any cost`} className="ml-1 text-warn-text">⚠</span>}</td>
         <td>{m(d.adSpend)}</td>
         <td>{m(d.mediaFee)}</td>
         <td>{m(d.fees)}</td>

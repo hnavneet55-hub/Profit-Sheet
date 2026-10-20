@@ -5,6 +5,7 @@ import { listStores } from "@/lib/stores";
 import { dailyStatus, type DayStatus } from "@/lib/checklist";
 import { addDays, daysBetween, today } from "@/lib/dates";
 import { money } from "@/lib/format";
+import { MISSING_COST_DAYS } from "@/lib/config";
 
 const isDate = (v: unknown): v is string => typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v);
 
@@ -125,7 +126,7 @@ function Cell({ storeId, date, c }: { storeId: number; date: string; c: DayStatu
           <Link href={`${orders}&invoiced=0`} className="text-warn-text hover:underline">{c.invoiced} of {c.orders} invoiced</Link>
         )}
       </div>
-      {c.missingCost > 0 && !c.sheetCogs && <Link href={`${orders}&missing=1`} className="block text-xs text-negative hover:underline">⚠ {c.missingCost} without any cost</Link>}
+      {c.missingCost > 0 && !c.sheetCogs && date >= addDays(today(), -MISSING_COST_DAYS) && <Link href={`${orders}&missing=1`} className="block text-xs text-negative hover:underline">⚠ {c.missingCost} without any cost</Link>}
       {c.refunds > 0 && <div className="text-xs text-muted">{c.refunds} refund{c.refunds === 1 ? "" : "s"}</div>}
     </td>
   );

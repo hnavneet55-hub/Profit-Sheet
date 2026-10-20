@@ -3,6 +3,7 @@ import { readOnlyQuery } from "@/db";
 import { loadCostIndex, costOn } from "@/lib/costs";
 import { today } from "@/lib/dates";
 import { money } from "@/lib/format";
+import { MISSING_COST_DAYS } from "@/lib/config";
 import { BASE_CURRENCY } from "@/lib/config";
 import { deleteCost, setCost } from "../../actions";
 
@@ -17,7 +18,10 @@ export default async function ProductsPage(props: PageProps<"/products">) {
       (select l.name from order_lines l where l.sku = s.sku group by l.name order by count(*) desc limit 1) as name,
       coalesce((select sum(l.quantity) from order_lines l join orders o on o.id = l.order_id where l.sku = s.sku and o.order_date >= current_date - 30), 0)::int as units,
       (select max(o.order_date)::text from order_lines l join orders o on o.id = l.order_id where l.sku = s.sku) as last_sold,
-      (select count(distinct l.order_id) from order_lines l where l.sku = s.sku and l.unit_cost_base is null)::int as missing_orders
+      (select count(distinct l.order_id) from order_lines l join orders o on o.id = l.order_id
+        where l.sku = s.sku and l.unit_cost_base is null and not o.cancelled and o.cogs_source <> 'invoice'
+          and o.order_date >= current_date - ${MISSING_COST_DAYS}
+          and not exists (select 1 from sheet_days d where d.store_id = o.store_id and d.date = o.order_date and d.cogs is not null))::int as missing_orders
     from (select sku from order_lines union select sku from product_costs) s
     order by units desc, s.sku`)) as Product[];
   const index = await loadCostIndex();
@@ -35,7 +39,7 @@ export default async function ProductsPage(props: PageProps<"/products">) {
         </div>
         <form className="flex gap-2">
           <input name="q" defaultValue={q} placeholder="Search SKU or name" className="input w-56" />
-          <label className="flex items-center gap-1 text-sm"><input type="checkbox" name="missing" value="1" defaultChecked={onlyMissing} /> Missing cost</label>
+          <label className="flex items-center gap-1 text-sm"><input type="checkbox" name="missing" value="1" defaultChecked={onlyMissing} /> Missing cost (last {MISSING_COST_DAYS} days)</label>
           <button className="btn-ghost">Filter</button>
         </form>
       </header>
@@ -72,7 +76,7 @@ export default async function ProductsPage(props: PageProps<"/products">) {
                         </ul>
                       </details>
                     ) : (
-                      <span className="text-warn-text">⚠ No cost{p.missing_orders ? ` · ${p.missing_orders} orders` : ""}</span>
+                      <span className="text-warn-text">⚠ No cost{p.missing_orders ? ` · ${p.missing_orders} recent orders` : ""}</span>
                     )}
                   </td>
                   <td>

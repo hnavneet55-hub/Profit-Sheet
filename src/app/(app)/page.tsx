@@ -52,7 +52,7 @@ export default async function ProfitSheetPage(props: PageProps<"/">) {
     { label: "Ad spend", value: money(t.adSpend, cur), sub: `+ ${money(t.mediaFee, cur)} media buyer fee` },
     { label: "ROAS", value: ratio(tr.roas), sub: `gross ${ratio(tr.grossRoas)} · CPC ${ta.cpc == null ? "—" : money(ta.cpc, cur)} · CVR ${pct(ta.cvr)}` },
     { label: "POAS", value: ratio(tr.poas), sub: "profit ÷ ad spend" },
-    { label: "Orders", value: t.orders.toLocaleString("en-GB"), sub: `${t.ordersDayWise ? `${t.ordersDayWise} costed by day (old sheet) · ` : ""}${t.ordersInvoiced} of ${t.orders - t.ordersDayWise} invoiced · COGS ${pct(tr.cogsPct)}` },
+    { label: "Orders", value: t.orders.toLocaleString("en-GB"), sub: `${[t.ordersDayWise && `${t.ordersDayWise} costed by day (old sheet)`, t.orders > t.ordersDayWise && `${t.ordersInvoiced} of ${t.orders - t.ordersDayWise} invoiced`].filter(Boolean).join(" · ")} · COGS ${pct(tr.cogsPct)}` },
   ];
 
   return (

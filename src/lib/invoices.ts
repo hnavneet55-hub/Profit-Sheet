@@ -52,8 +52,10 @@ const SYSTEM = `You read supplier invoices for an e-commerce business. The suppl
 
 Rules:
 - Return one entry per customer order number. If an order has several product lines, list them in items and sum their cost into product_cost.
-- order_ref is the order number exactly as the supplier wrote it. Never invent one; a line without an order number goes in unallocated_costs.
-- Split each order's charge into product_cost, shipping_cost and other_cost when the invoice shows them; otherwise put everything in product_cost and add a note.
+- order_ref is the store's order number exactly as the supplier wrote it, usually 3–6 digits like #1297. When a line shows both a long platform ID (e.g. 7164308488330) and a short order/reference number, use the short one. Never invent one; a line without an order number goes in unallocated_costs.
+- A number inside a customer or account name (e.g. "#1757 John Smith") is not an order number.
+- Split each order's charge into product_cost, shipping_cost and other_cost when the invoice shows them; otherwise put everything in product_cost and add a note. Fulfillment or service fees that include shipping go in shipping_cost; duties and other fees in other_cost.
+- If a fee is shown both before and after a discount (e.g. "service fee" and "net service fee"), use the amount actually charged. When a row has its own total, the three costs must add up to it.
 - Supplier credits or refunds for an order are negative amounts, with a note.
 - Charges for the invoice as a whole (bank fee, monthly fee) go in unallocated_costs. Don't spread them over orders.
 - Never guess a currency silently. If none is stated, use the most likely one and add a note saying it was assumed.
@@ -99,6 +101,9 @@ async function orderIndex(storeId: number): Promise<OrderIndex> {
   const byDigits = new Map<string, string[]>();
   for (const r of rows) {
     exact.set(normalize(r.name), r.id);
+    // Some suppliers print Shopify's internal order ID (the number at the end of the GID).
+    const legacyId = r.id.match(/\/(\d{8,})$/)?.[1]; // long enough never to look like an order number
+    if (legacyId) exact.set(legacyId, r.id);
     const d = digits(r.name);
     if (d) byDigits.set(d, [...(byDigits.get(d) ?? []), r.id]);
   }

@@ -68,15 +68,18 @@ async function extract(input: SupplierInput, store: { name: string; shopDomain: 
   ]
     .filter(Boolean)
     .join("\n");
-  const res = await client.beta.messages.parse({
-    model: CLAUDE_MODEL,
-    max_tokens: 64000,
-    system: SYSTEM,
-    messages: [{ role: "user", content: supplierContent(input, context, "supplier invoice") }],
-    output_config: { effort: "medium", format: zodOutputFormat(InvoiceSchema) },
-    betas: ["server-side-fallback-2026-07-01"],
-    fallbacks: "default",
-  });
+  // Streamed: long outputs exceed the SDK's limit for a single non-streaming request.
+  const res = await client.beta.messages
+    .stream({
+      model: CLAUDE_MODEL,
+      max_tokens: 64000,
+      system: SYSTEM,
+      messages: [{ role: "user", content: supplierContent(input, context, "supplier invoice") }],
+      output_config: { effort: "medium", format: zodOutputFormat(InvoiceSchema) },
+      betas: ["server-side-fallback-2026-07-01"],
+      fallbacks: "default",
+    })
+    .finalMessage();
   if (res.stop_reason === "refusal") throw new Error("Claude declined to process this invoice.");
   if (res.stop_reason === "max_tokens") throw new Error("The invoice is too long to read in one pass. Split it and try again.");
   if (!res.parsed_output) throw new Error("Claude's answer could not be read. Try again.");

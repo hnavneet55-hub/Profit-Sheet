@@ -52,15 +52,18 @@ async function extract(input: SupplierInput) {
   const client = new Anthropic();
   const content = supplierContent(input, `Our product catalogue (SKU<TAB>name):\n${await catalogue()}\n\nToday is ${today()}.`, "supplier quote");
 
-  const res = await client.beta.messages.parse({
-    model: CLAUDE_MODEL,
-    max_tokens: 32000,
-    system: SYSTEM,
-    messages: [{ role: "user", content }],
-    output_config: { effort: "medium", format: zodOutputFormat(QuoteSchema) },
-    betas: ["server-side-fallback-2026-07-01"],
-    fallbacks: "default",
-  });
+  // Streamed: long outputs exceed the SDK's limit for a single non-streaming request.
+  const res = await client.beta.messages
+    .stream({
+      model: CLAUDE_MODEL,
+      max_tokens: 32000,
+      system: SYSTEM,
+      messages: [{ role: "user", content }],
+      output_config: { effort: "medium", format: zodOutputFormat(QuoteSchema) },
+      betas: ["server-side-fallback-2026-07-01"],
+      fallbacks: "default",
+    })
+    .finalMessage();
   if (res.stop_reason === "refusal") throw new Error("Claude declined to process this quote.");
   if (res.stop_reason === "max_tokens") throw new Error("The quote is too long to read in one pass. Split it and try again.");
   if (!res.parsed_output) throw new Error("Claude's answer could not be read. Try again.");

@@ -24,7 +24,8 @@ const numOr = (f: FormData, k: string, d = 0) => {
 // ---- Login ----
 
 export async function login(_: string | null, form: FormData): Promise<string | null> {
-  if (str(form, "password") !== process.env.DASHBOARD_PASSWORD) return "Wrong password";
+  const user = process.env.DASHBOARD_USER;
+  if ((user && str(form, "user") !== user) || str(form, "password") !== process.env.DASHBOARD_PASSWORD) return "Wrong user ID or password";
   (await cookies()).set(SESSION_COOKIE, await sessionToken(), {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",

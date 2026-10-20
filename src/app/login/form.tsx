@@ -9,8 +9,12 @@ export function LoginForm({ next }: { next: string }) {
     <form action={action} className="space-y-3">
       <input type="hidden" name="next" value={next} />
       <div>
+        <label className="label" htmlFor="user">User ID</label>
+        <input id="user" name="user" className="input" autoComplete="username" autoFocus required />
+      </div>
+      <div>
         <label className="label" htmlFor="password">Password</label>
-        <input id="password" name="password" type="password" className="input" autoFocus required />
+        <input id="password" name="password" type="password" className="input" autoComplete="current-password" required />
       </div>
       {error && <p className="text-sm text-negative">{error}</p>}
       <button className="btn w-full" disabled={pending}>{pending ? "Signing in…" : "Sign in"}</button>

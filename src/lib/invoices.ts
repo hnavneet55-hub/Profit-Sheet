@@ -54,10 +54,11 @@ Rules:
 - Return one entry per customer order number. If an order has several product lines, list them in items and sum their cost into product_cost.
 - order_ref is the store's order number exactly as the supplier wrote it, usually 3–6 digits like #1297. When a line shows both a long platform ID (e.g. 7164308488330) and a short order/reference number, use the short one. Never invent one; a line without an order number goes in unallocated_costs.
 - A number inside a customer or account name (e.g. "#1757 John Smith") is not an order number.
-- Split each order's charge into product_cost, shipping_cost and other_cost when the invoice shows them; otherwise put everything in product_cost and add a note. Fulfillment or service fees that include shipping go in shipping_cost; duties and other fees in other_cost.
+- Split each order's charge into product_cost, shipping_cost and other_cost when the invoice shows them; otherwise put everything in product_cost and say so once in the invoice notes, not on every order. Fulfillment or service fees that include shipping go in shipping_cost; duties and other fees in other_cost.
 - If a fee is shown both before and after a discount (e.g. "service fee" and "net service fee"), use the amount actually charged. When a row has its own total, the three costs must add up to it.
 - Supplier credits or refunds for an order are negative amounts, with a note.
 - Charges for the invoice as a whole (bank fee, monthly fee) go in unallocated_costs. Don't spread them over orders.
+- Order notes are only for problems with that specific order: every note makes a person check the order by hand. Things that apply to all orders go in the invoice notes, once.
 - Never guess a currency silently. If none is stated, use the most likely one and add a note saying it was assumed.
 - If the order costs don't add up to the printed total, or anything else looks wrong, add a note.`;
 

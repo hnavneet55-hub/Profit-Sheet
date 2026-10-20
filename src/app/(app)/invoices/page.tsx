@@ -6,6 +6,9 @@ import { money } from "@/lib/format";
 import { uploadInvoice } from "../../actions";
 import { SubmitButton } from "@/components/submit-button";
 
+// Reading a large supplier export with Claude can take a couple of minutes.
+export const maxDuration = 300;
+
 const STATUS: Record<string, string> = { processing: "Reading…", pending: "Needs review", done: "Reviewed", failed: "Failed" };
 
 export default async function InvoicesPage(props: PageProps<"/invoices">) {

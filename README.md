@@ -45,7 +45,7 @@ pnpm seed:demo               # optional: a demo store with sample orders
 pnpm dev
 ```
 
-Without `DATABASE_URL` it uses an embedded Postgres in `.data/`, and without `DASHBOARD_PASSWORD` there is no login (local only).
+Without `DATABASE_URL` it uses an embedded Postgres in `.data/`, and without `DASHBOARD_PASSWORD` there is no login (local only). With `DASHBOARD_USER` set, the login asks for a user ID too.
 
 ## Connect a Shopify store
 

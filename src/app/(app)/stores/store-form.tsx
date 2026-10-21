@@ -53,6 +53,10 @@ export function StoreForm({ store }: { store?: Store }) {
               <label className="label" htmlFor="mediaBuyerFeePct">Media buyer fee (% of ad spend)</label>
               <input id="mediaBuyerFeePct" name="mediaBuyerFeePct" className="input" inputMode="decimal" defaultValue={store?.mediaBuyerFeePct ?? 10} />
             </div>
+            <div>
+              <label className="label" htmlFor="cogsTargetPct">Target cost of goods (% of sales)</label>
+              <input id="cogsTargetPct" name="cogsTargetPct" className="input" inputMode="decimal" defaultValue={store?.cogsTargetPct ?? ""} placeholder="e.g. 30" />
+            </div>
           </div>
         </fieldset>
 

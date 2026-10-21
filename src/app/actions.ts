@@ -61,6 +61,7 @@ export async function saveStore(form: FormData) {
     paymentFeeFixed: numOr(form, "paymentFeeFixed"),
     platformFeePct: numOr(form, "platformFeePct"),
     mediaBuyerFeePct: numOr(form, "mediaBuyerFeePct"),
+    cogsTargetPct: str(form, "cogsTargetPct") ? numOr(form, "cogsTargetPct") : null,
     useReportedFees: form.get("useReportedFees") === "on",
     active: form.get("active") === "on",
   };

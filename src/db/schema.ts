@@ -39,6 +39,8 @@ export const stores = pgTable("stores", {
   useReportedFees: boolean("use_reported_fees").notNull().default(true),
   // Media buyer / agency fee as a percentage of ad spend
   mediaBuyerFeePct: doublePrecision("media_buyer_fee_pct").notNull().default(0),
+  // Cost of goods we aim for, as % of what the customer paid (excl. VAT); shown on the COG check.
+  cogsTargetPct: doublePrecision("cogs_target_pct"),
   active: boolean("active").notNull().default(true),
   lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }),
   lastSyncError: text("last_sync_error"),

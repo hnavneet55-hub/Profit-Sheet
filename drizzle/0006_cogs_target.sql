@@ -1,0 +1,1 @@
+ALTER TABLE "stores" ADD COLUMN "cogs_target_pct" double precision;

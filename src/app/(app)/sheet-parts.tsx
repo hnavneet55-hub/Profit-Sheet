@@ -44,7 +44,7 @@ export function Kpis({ title, items }: { title?: string; items: Kpi[] }) {
 // Column sections of the daily sheet; advertising is kept apart from the other costs.
 const GROUP_CLASS = { sales: "", costs: "grp-costs", ads: "grp-ads", result: "grp-result" } as const;
 
-export function SheetTable({ days, total, currency, month, lastDay, withExpenses, costCutoff, missingCost }: { days: DayRow[]; total: DayRow; currency: string; month: string; lastDay: string; withExpenses: boolean; costCutoff: string; missingCost: number }) {
+export function SheetTable({ days, total, currency, month, lastDay, withExpenses, costCutoff, missingCost, dayHref }: { days: DayRow[]; total: DayRow; currency: string; month: string; lastDay: string; withExpenses: boolean; costCutoff: string; missingCost: number; dayHref?: (date: string) => string }) {
   const groups: { key: keyof typeof GROUP_CLASS; label: string; cols: string[] }[] = [
     { key: "sales", label: "Sales", cols: ["Gross revenue", "Refunds", "Refund %", "Revenue"] },
     { key: "costs", label: "Costs", cols: ["Cost of goods", "COG %", "Transaction fees", ...(withExpenses ? ["Business expenses"] : [])] },
@@ -59,7 +59,7 @@ export function SheetTable({ days, total, currency, month, lastDay, withExpenses
     const c = (g: keyof typeof GROUP_CLASS, first = false) => `${GROUP_CLASS[g]} ${first ? "grp-start" : ""}`;
     return (
       <tr key={label} className={isTotal ? "total-row font-semibold" : empty ? "text-muted" : ""}>
-        <td className="text-left">{label}</td>
+        <td className="text-left">{dayHref && !isTotal && !empty && d.orders > 0 ? <Link className="text-accent hover:underline" href={dayHref(d.date)} title="See this day's orders and cost of goods">{label}</Link> : label}</td>
         <td className="grp-start">{m(d.gross)}</td>
         <td className={d.refunds > 0 && !empty ? "text-negative" : ""}>{m(d.refunds)}</td>
         <td className={!empty && (r.refundPct ?? 0) >= 0.1 ? "text-negative" : ""}>{empty || !d.gross ? "" : pct(r.refundPct)}</td>

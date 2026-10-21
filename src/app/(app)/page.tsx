@@ -112,7 +112,7 @@ export default async function StoreSheetPage(props: PageProps<"/">) {
       </section>
 
       <section className="card overflow-x-auto">
-        <SheetTable days={sheet.days} total={t} currency={cur} month={month} lastDay={lastDay} withExpenses={false} costCutoff={costCutoff} missingCost={missingCost} />
+        <SheetTable days={sheet.days} total={t} currency={cur} month={month} lastDay={lastDay} withExpenses={false} costCutoff={costCutoff} missingCost={missingCost} dayHref={(d) => `/cogs?store=${store.id}&date=${d}`} />
       </section>
     </div>
   );
@@ -194,7 +194,7 @@ function Checklist({ store, todo, adsAt, adsDiffer, next }: { store: Store; todo
             {todo.invoiceDays.map((d) => (
               <li key={d.date} className="space-y-1">
                 <div className="flex flex-wrap items-baseline justify-between gap-x-2 text-sm">
-                  <span className="num font-medium">{dayLabel(d.date)}</span>
+                  <Link className="num font-medium hover:underline" href={`/cogs?store=${store.id}&date=${d.date}`} title="See this day's orders and cost of goods">{dayLabel(d.date)}</Link>
                   <Link className="text-xs text-warn-text hover:underline" href={`/orders?store=${store.id}&from=${d.date}&to=${d.date}&invoiced=0`}>
                     {d.notInvoiced === d.orders ? `${d.orders} order${d.orders === 1 ? "" : "s"}, none invoiced` : `${d.notInvoiced} of ${d.orders} orders not invoiced`}
                     {d.missingCost > 0 && <span className="text-negative"> · {d.missingCost} no cost</span>}

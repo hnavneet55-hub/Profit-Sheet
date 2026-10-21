@@ -43,6 +43,13 @@
       "when": 1792572623576,
       "tag": "0005_ads_reports",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1792578412722,
+      "tag": "0006_cogs_target",
+      "breakpoints": true
     }
   ]
 }

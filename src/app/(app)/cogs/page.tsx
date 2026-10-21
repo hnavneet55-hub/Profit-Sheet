@@ -3,6 +3,7 @@ import { listStores } from "@/lib/stores";
 import { cogsDay, type CogsOrder } from "@/lib/cogs-check";
 import { addDays, today } from "@/lib/dates";
 import { money, pct } from "@/lib/format";
+import { COGS_TARGETS } from "@/lib/config";
 import { Kpis } from "../sheet-parts";
 
 const SOURCE: Record<CogsOrder["source"], string> = { invoice: "Supplier invoice", estimate: "SKU-cost estimate", missing: "No cost yet" };
@@ -32,13 +33,16 @@ export default async function CogsCheckPage(props: PageProps<"/cogs">) {
           <h1 className="text-xl font-semibold">Cost of goods check</h1>
           <p className="text-sm text-muted">Every order of one day: what the customer paid (excl. VAT, incl. shipping) next to what the supplier charged, in {cur}.</p>
         </div>
-        <p className="text-right text-sm">
-          {store.cogsTargetPct != null ? (
-            <>Target cost of goods for {store.name}: <b>{store.cogsTargetPct}%</b> of sales</>
-          ) : (
-            <span className="text-muted">No target set for {store.name}. <Link className="underline" href={`/stores/${store.id}`}>Set one</Link></span>
-          )}
-        </p>
+        <aside className="card min-w-64 px-4 py-3 text-sm" aria-label="Target cost of goods">
+          <h2 className="mb-1 text-xs font-semibold tracking-wide text-muted uppercase">Target cost of goods</h2>
+          <ul className="space-y-0.5">
+            {COGS_TARGETS.map((t) => (
+              <li key={t.niche} className="flex justify-between gap-4"><span className="text-muted">{t.niche}</span><b className="num text-right">{t.target}</b></li>
+            ))}
+          </ul>
+          {store.cogsTargetPct != null && <p className="mt-2 border-t border-border pt-2">{store.name}: <b>{store.cogsTargetPct}%</b></p>}
+          <p className="mt-1 text-xs text-muted">% of what the customer paid, excl. VAT</p>
+        </aside>
       </header>
 
       <nav className="flex gap-2 overflow-x-auto pb-1" aria-label="Stores">

@@ -93,7 +93,7 @@ export async function syncNow(form: FormData) {
 
 // ---- Ad spend ----
 
-async function insertAdSpend(rows: { date: string; storeId: number | null; platform: string; account: string | null; currency: string; amount: number; cpc: number | null; cvr: number | null; note: string | null }[]) {
+async function insertAdSpend(rows: { date: string; storeId: number | null; platform: string; account: string | null; currency: string; amount: number; cpc: number | null; note: string | null }[]) {
   const db = await getDb();
   const values = [];
   for (const r of rows) values.push({ ...r, amountBase: await toBase(r.amount, r.currency, r.date) });
@@ -111,20 +111,31 @@ export async function addAdSpend(form: FormData) {
   };
   const bulk = str(form, "bulk");
   if (bulk) {
-    // One "YYYY-MM-DD amount CPC CVR%" per line; tab, semicolon or space separated.
+    // One "YYYY-MM-DD amount CPC" per line; tab, semicolon or space separated. Extra columns are ignored.
     const rows = bulk
       .split("\n")
       .map((l) => l.trim())
       .filter(Boolean)
       .map((l) => {
-        const [date, amount, cpc, cvr] = l.split(/[\t; ]+/).map((v) => v.replace(",", ".").replace("%", ""));
-        return { date, amount: Number(amount), cpc: Number(cpc) || null, cvr: Number(cvr) || null };
+        const [date, amount, cpc] = l.split(/[\t; ]+/).map((v) => v.replace(",", "."));
+        return { date, amount: Number(amount), cpc: Number(cpc) || null };
       })
       .filter((r) => /^\d{4}-\d{2}-\d{2}$/.test(r.date) && Number.isFinite(r.amount));
     await insertAdSpend(rows.map((r) => ({ ...base, ...r })));
   } else {
-    await insertAdSpend([{ ...base, date: str(form, "date"), amount: numOr(form, "amount"), cpc: numOr(form, "cpc") || null, cvr: numOr(form, "cvr") || null }]);
+    // "No ads" records the day as 0 so it stops showing as missing.
+    const noAds = str(form, "noAds") === "1";
+    await insertAdSpend([{ ...base, date: str(form, "date"), amount: noAds ? 0 : numOr(form, "amount"), cpc: noAds ? null : numOr(form, "cpc") || null }]);
   }
+  revalidatePath("/", "layout");
+}
+
+/** Adds the missing CPC to an ad spend row that was entered or imported without one. */
+export async function setAdSpendCpc(form: FormData) {
+  const cpc = numOr(form, "cpc");
+  if (!(cpc > 0)) return;
+  const db = await getDb();
+  await db.update(schema.adSpend).set({ cpc }).where(eq(schema.adSpend.id, Number(str(form, "id"))));
   revalidatePath("/", "layout");
 }
 

@@ -1,253 +1,216 @@
 import Link from "next/link";
-import { adStats, buildSheet, ratios, type DayRow } from "@/lib/report";
-import { readOnlyQuery } from "@/db";
+import { adStats, buildSheet, ratios } from "@/lib/report";
 import { listStores } from "@/lib/stores";
+import { storeTodos, type StoreTodo } from "@/lib/checklist";
 import { addDays, today } from "@/lib/dates";
 import { money, pct, ratio, monthLabel, shortDate } from "@/lib/format";
-import { BASE_CURRENCY, MISSING_COST_DAYS } from "@/lib/config";
+import { MISSING_COST_DAYS } from "@/lib/config";
 import { ProfitChart } from "@/components/profit-chart";
-import { syncNow } from "../actions";
+import { SubmitButton } from "@/components/submit-button";
+import { addAdSpend, setAdSpendCpc, syncNow, uploadInvoice } from "../actions";
+import { Kpis, SheetTable, monthRange, parseMonth, shiftMonth } from "./sheet-parts";
 
-function monthRange(month: string) {
-  const [y, m] = month.split("-").map(Number);
-  const last = new Date(Date.UTC(y, m, 0)).getUTCDate();
-  return { from: `${month}-01`, to: `${month}-${String(last).padStart(2, "0")}` };
-}
+// Reading a supplier invoice with Claude can take a couple of minutes.
+export const maxDuration = 300;
 
-function shiftMonth(month: string, delta: number) {
-  const [y, m] = month.split("-").map(Number);
-  const d = new Date(Date.UTC(y, m - 1 + delta, 1));
-  return d.toISOString().slice(0, 7);
-}
+// The checklist covers this many days up to yesterday (today's ad spend isn't final yet).
+const TODO_DAYS = 30;
 
-export default async function ProfitSheetPage(props: PageProps<"/">) {
+const dayLabel = (d: string) => new Date(`${d}T12:00:00Z`).toLocaleDateString("en-GB", { weekday: "short", day: "2-digit", month: "short", timeZone: "UTC" });
+
+/** One store at a time: what's left to enter, then its profit sheet in its Google Ads currency. */
+export default async function StoreSheetPage(props: PageProps<"/">) {
   const sp = await props.searchParams;
-  const month = typeof sp.month === "string" && /^\d{4}-\d{2}$/.test(sp.month) ? sp.month : today().slice(0, 7);
-  const storeId = Number(sp.store) || undefined;
-  const stores = await listStores();
-  const store = stores.find((s) => s.id === storeId);
+  const month = parseMonth(sp.month);
+  const stores = (await listStores()).filter((s) => s.active);
+  if (!stores.length) {
+    return <p className="text-sm text-muted">No stores connected yet. <Link className="underline" href="/stores/new">Add your first store</Link>.</p>;
+  }
+  const store = stores.find((s) => s.id === Number(sp.store)) ?? stores[0];
+  const cur = store.reportingCurrency;
+
+  const todoTo = addDays(today(), -1);
+  const costCutoff = addDays(today(), -MISSING_COST_DAYS);
+  const todos = await storeTodos(stores.map((s) => s.id), addDays(todoTo, -(TODO_DAYS - 1)), todoTo, costCutoff);
+  const todo = todos.get(store.id)!;
+  const i = stores.indexOf(store);
+  const next = [...stores.slice(i + 1), ...stores.slice(0, i)].find((s) => todos.get(s.id)!.count > 0);
+
   const { from, to } = monthRange(month);
-  const sheet = await buildSheet({ storeId, from, to });
-  const cur = sheet.currency;
+  const sheet = await buildSheet({ storeId: store.id, from, to });
   const t = sheet.total;
   const tr = ratios(t);
   const ta = adStats(t);
   const lastDay = to < today() ? to : today();
   const visibleDays = sheet.days.filter((d) => d.date <= lastDay);
-  const noAdDays = visibleDays.filter((d) => d.orders > 0 && d.adSpend === 0).length;
-  const syncErrors = stores.filter((s) => s.active && s.lastSyncError);
-  // Orders whose day takes its cost from the old profit sheet don't need an invoice.
-  // Orders counted one by one (after the old sheet ends) with no cost at all: no invoice and no SKU cost. Older ones are ignored.
-  const costCutoff = addDays(today(), -MISSING_COST_DAYS);
-  const missingDays = visibleDays.filter((d) => d.ordersMissingCogs > 0 && d.date >= costCutoff);
-  const missingCost = missingDays.reduce((n, d) => n + d.ordersMissingCogs, 0);
-  // The rest of the not-invoiced orders use the SKU-cost estimate.
-  const estimated = t.orders - t.ordersDayWise - t.ordersInvoiced - t.ordersMissingCogs;
-  const span = sp.span === "ytd" || sp.span === "all" ? sp.span : "month";
-  const qs = (m: string, s?: number, sp2 = span) => `/?month=${m}${s ? `&store=${s}` : ""}${sp2 !== "month" ? `&span=${sp2}` : ""}`;
-
-  const kpis = [
-    { label: "Revenue", value: money(t.revenue, cur), sub: `after ${money(t.refunds, cur)} refunds` },
-    { label: storeId ? "Profit" : "Net profit", value: money(t.profit, cur), sub: storeId ? `${pct(tr.profitPct)} of gross` : `after ${money(t.expenses, cur)} business expenses`, tone: t.profit < 0 ? "neg" : undefined },
-    { label: "Ad spend", value: money(t.adSpend, cur), sub: `+ ${money(t.mediaFee, cur)} media buyer fee` },
-    { label: "ROAS", value: ratio(tr.roas), sub: `gross ${ratio(tr.grossRoas)} · CPC ${ta.cpc == null ? "—" : money(ta.cpc, cur)} · CVR ${pct(ta.cvr)}` },
-    { label: "POAS", value: ratio(tr.poas), sub: "profit ÷ ad spend" },
-    { label: "Orders", value: t.orders.toLocaleString("en-GB"), sub: `${[t.ordersDayWise && `${t.ordersDayWise} costed by day (old sheet)`, t.orders > t.ordersDayWise && `${t.ordersInvoiced} of ${t.orders - t.ordersDayWise} invoiced`].filter(Boolean).join(" · ")} · COGS ${pct(tr.cogsPct)}` },
-  ];
+  const missingCost = visibleDays.reduce((n, d) => n + (d.date >= costCutoff ? d.ordersMissingCogs : 0), 0);
+  const qs = (m: string, s = store.id) => `/?store=${s}&month=${m}`;
 
   return (
     <div className="space-y-5">
+      <nav className="flex gap-2 overflow-x-auto pb-1" aria-label="Stores">
+        {stores.map((s) => {
+          const n = todos.get(s.id)!.count;
+          const on = s.id === store.id;
+          return (
+            <Link key={s.id} href={qs(month, s.id)} className={`store-tab ${on ? "store-tab-on" : ""}`} aria-current={on ? "page" : undefined}>
+              <span>{s.name}</span>
+              <span className={`badge ${n ? "badge-warn" : "badge-ok"}`}>{n ? n : "✓"}</span>
+            </Link>
+          );
+        })}
+      </nav>
+
       <header className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-xl font-semibold">{store ? store.name : "All stores"} · {monthLabel(month)}</h1>
-          <p className="text-sm text-muted">
-            Amounts in {cur}{store ? " (Google Ads account currency)" : ""}, excl. VAT, converted with each day&apos;s locked rate.
-          </p>
+          <h1 className="text-xl font-semibold">{store.name}</h1>
+          <p className="text-sm text-muted">Amounts in {cur} (the Google Ads account currency), excl. VAT. Orders, refunds, conversion rate and refund % come from Shopify automatically.</p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <form className="flex gap-2" action="/">
-            <input type="hidden" name="month" value={month} />
-            <select name="store" defaultValue={storeId ?? ""} className="input w-auto">
-              <option value="">All stores ({BASE_CURRENCY})</option>
-              {stores.map((s) => (
-                <option key={s.id} value={s.id}>{s.name} ({s.reportingCurrency})</option>
-              ))}
-            </select>
-            <button className="btn-ghost">Show</button>
-          </form>
-          <Link className="btn-ghost" href={qs(shiftMonth(month, -1), storeId)} aria-label="Previous month">←</Link>
-          <Link className="btn-ghost" href={qs(shiftMonth(month, 1), storeId)} aria-label="Next month">→</Link>
-          <form action={syncNow}>
-            {storeId && <input type="hidden" name="id" value={storeId} />}
-            <button className="btn">Sync now</button>
-          </form>
-        </div>
+        <form action={syncNow}>
+          <input type="hidden" name="id" value={store.id} />
+          <SubmitButton variant="ghost" pendingLabel="Syncing…">Sync {store.name} now</SubmitButton>
+        </form>
       </header>
 
-      {(missingCost > 0 || noAdDays > 0 || estimated > 0 || syncErrors.length > 0 || stores.length === 0) && (
-        <div className="space-y-1 rounded-lg bg-warn-bg px-4 py-3 text-sm text-warn-text">
-          {stores.length === 0 && (
-            <p>No stores connected yet. <Link className="underline" href="/stores/new">Add your first store</Link>.</p>
-          )}
-          {missingCost > 0 && (
-            <p>
-              ⚠ {missingCost} order{missingCost === 1 ? "" : "s"} from {shortDate(missingDays[0].date)}
-              {missingDays.length > 1 ? ` – ${shortDate(missingDays.at(-1)!.date)}` : ""} {missingCost === 1 ? "has" : "have"} no cost of goods yet: they&apos;re after the old profit sheet ends, so they&apos;re costed order by order, and there&apos;s no supplier invoice for them yet. Their cost counts as 0, so profit is overstated until the invoices are uploaded.{" "}
-              <Link className="underline" href="/invoices">Upload invoices</Link> · <Link className="underline" href={`/orders?from=${missingDays[0].date}&to=${missingDays.at(-1)!.date}&missing=1${storeId ? `&store=${storeId}` : ""}`}>See the orders</Link>
-            </p>
-          )}
-          {estimated > 0 && (
-            <p>
-              {estimated} of {t.orders} orders aren&apos;t covered by a supplier invoice yet, so their cost of goods is the SKU-cost estimate.{" "}
-              <Link className="underline" href="/daily">Daily check</Link> · <Link className="underline" href="/invoices">Upload invoices</Link>
-            </p>
-          )}
-          {noAdDays > 0 && (
-            <p>
-              ⚠ {noAdDays} day{noAdDays === 1 ? "" : "s"} with orders but no ad spend entered.{" "}
-              <Link className="underline" href="/ad-spend">Enter ad spend</Link>
-            </p>
-          )}
-          {syncErrors.map((s) => (
-            <p key={s.id}>⚠ {s.name} failed to sync: {s.lastSyncError}</p>
-          ))}
-        </div>
-      )}
+      <Checklist store={store} todo={todo} next={next && { name: next.name, href: qs(month, next.id) }} />
 
-      <section className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
-        {kpis.map((k) => (
-          <div key={k.label} className="card px-4 py-3">
-            <div className="text-xs text-muted">{k.label}</div>
-            <div className={`num mt-1 text-xl font-semibold ${k.tone === "neg" ? "text-negative" : ""}`}>{k.value}</div>
-            <div className="num mt-0.5 text-xs text-muted">{k.sub}</div>
-          </div>
-        ))}
-      </section>
+      <div className="flex flex-wrap items-center justify-between gap-2 pt-2">
+        <h2 className="text-lg font-semibold">Profit sheet · {monthLabel(month)}</h2>
+        <div className="flex gap-2">
+          <Link className="btn-ghost" href={qs(shiftMonth(month, -1))} aria-label="Previous month">←</Link>
+          <Link className="btn-ghost" href={qs(shiftMonth(month, 1))} aria-label="Next month">→</Link>
+        </div>
+      </div>
+
+      <Kpis
+        items={[
+          { label: "Revenue", value: money(t.revenue, cur), sub: `after ${money(t.refunds, cur)} refunds (${pct(tr.refundPct)})` },
+          { label: "Profit", value: money(t.profit, cur), sub: `${pct(tr.profitPct)} of gross`, tone: t.profit < 0 ? "neg" : "pos" },
+          { label: "Ad spend", value: money(t.adSpend, cur), sub: `+ ${money(t.mediaFee, cur)} media buyer fee` },
+          { label: "ROAS", value: ratio(tr.roas), sub: `gross ${ratio(tr.grossRoas)} · CPC ${ta.cpc == null ? "—" : money(ta.cpc, cur)} · CVR ${pct(ta.cvr)}` },
+          { label: "POAS", value: ratio(tr.poas), sub: "profit ÷ ad spend" },
+          { label: "Orders", value: t.orders.toLocaleString("en-GB"), sub: `COGS ${pct(tr.cogsPct)} of gross` },
+        ]}
+      />
 
       <section className="card p-4">
         <h2 className="mb-2 text-sm font-medium">Daily profit</h2>
-        <ProfitChart
-          currency={cur}
-          data={visibleDays.map((d) => ({ date: d.date, label: shortDate(d.date), profit: d.profit, revenue: d.revenue, adSpend: d.adSpend }))}
-        />
+        <ProfitChart currency={cur} data={visibleDays.map((d) => ({ date: d.date, label: shortDate(d.date), profit: d.profit, revenue: d.revenue, adSpend: d.adSpend }))} />
       </section>
 
-      <StoreBreakdown month={month} span={span} selected={storeId} stores={stores} link={(sp2) => qs(month, storeId, sp2)} />
-
       <section className="card overflow-x-auto">
-        <SheetTable days={sheet.days} total={t} currency={cur} month={month} lastDay={lastDay} withExpenses={!storeId} costCutoff={costCutoff} missingCost={missingCost} />
+        <SheetTable days={sheet.days} total={t} currency={cur} month={month} lastDay={lastDay} withExpenses={false} costCutoff={costCutoff} missingCost={missingCost} />
       </section>
     </div>
   );
 }
 
-function SheetTable({ days, total, currency, month, lastDay, withExpenses, costCutoff, missingCost }: { days: DayRow[]; total: DayRow; currency: string; month: string; lastDay: string; withExpenses: boolean; costCutoff: string; missingCost: number }) {
-  const cols = ["Date", "Gross revenue", "Refunds", "Revenue", "Cost of goods", "Ad spend", "Media buyer fee", "Transaction fees", ...(withExpenses ? ["Business expenses"] : []), "Profit", "ROAS", "Gross ROAS", "Profit %", "COG %", "POAS", "CPC", "CVR %"];
-  const row = (d: DayRow, label: string, isTotal = false) => {
-    const r = ratios(d);
-    const a = adStats(d);
-    const empty = !isTotal && d.date > lastDay;
-    const m = (n: number) => (empty ? "" : money(n, currency));
+type Store = Awaited<ReturnType<typeof listStores>>[number];
+
+/** The data-entry steps for one store, with the inputs right there. */
+function Checklist({ store, todo, next }: { store: Store; todo: StoreTodo; next?: { name: string; href: string } }) {
+  const cur = store.reportingCurrency;
+  const adLeft = todo.adDays.length + todo.cpcRows.length;
+  const invLeft = todo.pending.length + (todo.notInvoiced > 0 ? 1 : 0);
+
+  if (todo.count === 0 && !store.lastSyncError) {
     return (
-      <tr key={label} className={isTotal ? "bg-accent-soft font-semibold" : empty ? "text-muted" : ""}>
-        <td className="text-left">{label}</td>
-        <td>{m(d.gross)}</td>
-        <td>{m(d.refunds)}</td>
-        <td>{m(d.revenue)}</td>
-        <td>{m(d.cogs)}{!empty && d.ordersSheetCogs > 0 && !isTotal && <span title="Cost of goods from the old profit sheet" className="ml-1 text-xs text-muted">sheet</span>}{!empty && d.ordersMissingCogs > 0 && (isTotal ? missingCost > 0 : d.date >= costCutoff) && <span title={`${isTotal ? missingCost : d.ordersMissingCogs} orders without any cost`} className="ml-1 text-warn-text">⚠</span>}</td>
-        <td>{m(d.adSpend)}</td>
-        <td>{m(d.mediaFee)}</td>
-        <td>{m(d.fees)}</td>
-        {withExpenses && <td>{d.expenses ? m(d.expenses) : ""}</td>}
-        <td className={`font-semibold ${d.profit < 0 ? "text-negative" : ""}`}>{m(d.profit)}</td>
-        <td>{empty ? "" : ratio(r.roas)}</td>
-        <td>{empty ? "" : ratio(r.grossRoas)}</td>
-        <td>{empty ? "" : pct(r.profitPct)}</td>
-        <td>{empty ? "" : pct(r.cogsPct)}</td>
-        <td>{empty ? "" : ratio(r.poas)}</td>
-        <td>{empty || a.cpc == null ? (!empty && d.adSpend > 0 ? <span className="text-warn-text" title="Enter the CPC with the ad spend">—</span> : "") : money(a.cpc, currency)}</td>
-        <td>{empty || a.cvr == null ? "" : pct(a.cvr)}{!empty && a.cvr != null && d.cvrCalculated && <span title="No conversion rate entered: orders ÷ clicks" className="ml-1 text-xs text-muted">calc</span>}</td>
-      </tr>
+      <section className="alert-ok flex flex-wrap items-center justify-between gap-3">
+        <p className="font-medium">✓ {store.name} is done: ad spend and supplier invoices are in for the last {TODO_DAYS} days.</p>
+        {next ? <Link className="btn" href={next.href}>Next: {next.name} →</Link> : <span className="text-sm">All stores are done.</span>}
+      </section>
     );
-  };
+  }
+
   return (
-    <table className="table num [&_td]:text-right [&_th]:text-right [&_th:first-child]:text-left">
-      <thead>
-        <tr>{cols.map((c) => <th key={c}>{c}</th>)}</tr>
-      </thead>
-      <tbody>
-        {days.map((d) => row(d, new Date(`${d.date}T12:00:00Z`).toLocaleDateString("en-GB", { timeZone: "UTC" })))}
-        {row(total, monthLabel(month).split(" ")[0].toUpperCase(), true)}
-      </tbody>
-    </table>
+    <section className="grid gap-3 lg:grid-cols-3">
+      <Step n={1} title="Ad spend" left={adLeft} hint={`From Google Ads, in ${cur}: the day's cost and the average CPC.`}>
+        {adLeft === 0 && <p className="text-sm text-muted">Entered for every day.</p>}
+        {todo.adDays.length > 0 && (
+          <ul className="max-h-96 space-y-2 overflow-y-auto">
+            {todo.adDays.slice().reverse().map((d) => (
+              <li key={d.date}>
+                <form action={addAdSpend} className="flex flex-wrap items-center gap-2">
+                  <input type="hidden" name="storeId" value={store.id} />
+                  <input type="hidden" name="currency" value={cur} />
+                  <input type="hidden" name="date" value={d.date} />
+                  <span className="num w-24 shrink-0 text-sm">{dayLabel(d.date)}<span className="block text-xs text-muted">{d.orders} order{d.orders === 1 ? "" : "s"}</span></span>
+                  <input name="amount" className="input w-24" inputMode="decimal" placeholder={`Spend ${cur}`} aria-label={`Ad spend ${d.date}`} required />
+                  <input name="cpc" className="input w-20" inputMode="decimal" placeholder="CPC" aria-label={`CPC ${d.date}`} required />
+                  <SubmitButton pendingLabel="…">Save</SubmitButton>
+                  <button name="noAds" value="1" formNoValidate className="text-xs text-muted hover:text-text" title="No ads ran this day">No ads</button>
+                </form>
+              </li>
+            ))}
+          </ul>
+        )}
+        {todo.cpcRows.length > 0 && (
+          <ul className="space-y-2 border-t border-border pt-2">
+            <li className="text-xs text-muted">Entered without a CPC:</li>
+            {todo.cpcRows.map((r) => (
+              <li key={r.id}>
+                <form action={setAdSpendCpc} className="flex flex-wrap items-center gap-2">
+                  <input type="hidden" name="id" value={r.id} />
+                  <span className="num w-24 shrink-0 text-sm">{dayLabel(r.date)}</span>
+                  <span className="num w-24 text-sm">{money(r.amount, r.currency)}</span>
+                  <input name="cpc" className="input w-20" inputMode="decimal" placeholder="CPC" aria-label={`CPC ${r.date}`} required />
+                  <SubmitButton pendingLabel="…">Save</SubmitButton>
+                </form>
+              </li>
+            ))}
+          </ul>
+        )}
+        {todo.adDays.length > 3 && <Link className="text-xs text-accent underline" href={`/ad-spend?store=${store.id}`}>Paste many days at once</Link>}
+      </Step>
+
+      <Step n={2} title="Cost of goods" left={invLeft} hint="Upload the supplier's invoice or export for this store. Claude matches it to the orders.">
+        {todo.orders === 0 ? (
+          <p className="text-sm text-muted">No orders to invoice: these days are costed from the old profit sheet.</p>
+        ) : (
+          <p className={`text-sm ${todo.notInvoiced ? "text-warn-text" : "text-positive"}`}>
+            {todo.notInvoiced ? `${todo.notInvoiced} of ${todo.orders} orders not on an invoice yet` : `✓ All ${todo.orders} orders invoiced`}
+            {todo.missingCost > 0 && <span className="block text-negative">⚠ {todo.missingCost} with no cost at all, so profit is overstated</span>}
+          </p>
+        )}
+        {todo.notInvoiced > 0 && (
+          <form action={uploadInvoice} className="space-y-2">
+            <input type="hidden" name="storeId" value={store.id} />
+            <input type="file" name="file" required accept=".pdf,application/pdf,.xlsx,.xls,.xlsm,.csv,.ods,image/png,image/jpeg,image/webp" className="input" aria-label="Invoice file" />
+            <SubmitButton pendingLabel="Claude is reading the invoice…">Upload invoice</SubmitButton>
+          </form>
+        )}
+        {todo.pending.length > 0 && (
+          <ul className="space-y-1 border-t border-border pt-2 text-sm">
+            <li className="text-xs text-muted">Read, waiting for you to check and approve:</li>
+            {todo.pending.map((p) => (
+              <li key={p.id}><Link className="text-accent underline" href={`/invoices/${p.id}`}>Review {p.label} →</Link></li>
+            ))}
+          </ul>
+        )}
+      </Step>
+
+      <Step n={3} title="Orders & refunds" left={store.lastSyncError ? 1 : 0} hint="Nothing to enter: synced from Shopify every hour.">
+        {store.lastSyncError ? (
+          <p className="text-sm text-negative">⚠ Sync failed: {store.lastSyncError}. <Link className="underline" href={`/stores/${store.id}`}>Check the store settings</Link></p>
+        ) : (
+          <p className="text-sm text-muted">Last synced {store.lastSyncedAt ? store.lastSyncedAt.toLocaleString("en-GB") : "never"}.</p>
+        )}
+        {todo.count === 0 && next && <Link className="btn" href={next.href}>Next: {next.name} →</Link>}
+      </Step>
+    </section>
   );
 }
 
-const SPANS = { month: "This month", ytd: "Year to date", all: "All time" } as const;
-
-/** Profit or loss per store and for the whole business, all in the base currency so stores add up. */
-async function StoreBreakdown({ month, span, selected, stores, link }: {
-  month: string;
-  span: keyof typeof SPANS;
-  selected?: number;
-  stores: Awaited<ReturnType<typeof listStores>>;
-  link: (span: keyof typeof SPANS) => string;
-}) {
-  let { from, to } = monthRange(month);
-  if (span === "ytd") ({ from, to } = { from: `${month.slice(0, 4)}-01-01`, to: to < today() ? to : today() });
-  if (span === "all") {
-    const [r] = await readOnlyQuery(`select least((select min(order_date) from orders), (select min(date) from ad_spend))::text as first`);
-    from = r?.first ? String(r.first) : today();
-    to = today();
-  }
-  const rows = await Promise.all(stores.map(async (s) => ({ store: s, t: (await buildSheet({ storeId: s.id, from, to, inBase: true })).total })));
-  const sum = (await buildSheet({ from, to })).total; // includes ad spend not tied to a store
-  const line = (key: string | number, label: React.ReactNode, d: DayRow, cls = "") => {
-    const r = ratios(d);
-    return (
-      <tr key={key} className={cls}>
-        <td className="text-left">{label}</td>
-        <td>{d.orders.toLocaleString("en-GB")}</td>
-        <td>{money(d.revenue, BASE_CURRENCY)}</td>
-        <td>{money(d.cogs, BASE_CURRENCY)}<span className="ml-1 text-xs text-muted">{d.orders > d.ordersDayWise ? `${Math.round((d.ordersInvoiced / (d.orders - d.ordersDayWise)) * 100)}% inv.` : d.orders ? "sheet" : ""}</span></td>
-        <td>{money(d.adSpend + d.mediaFee, BASE_CURRENCY)}</td>
-        <td>{money(d.fees, BASE_CURRENCY)}</td>
-        <td className={`font-semibold ${d.profit < 0 ? "text-negative" : "text-positive"}`}>{money(d.profit, BASE_CURRENCY)}</td>
-        <td>{pct(r.profitPct)}</td>
-        <td>{ratio(r.roas)}</td>
-        <td>{ratio(r.poas)}</td>
-      </tr>
-    );
-  };
+function Step({ n, title, left, hint, children }: { n: number; title: string; left: number; hint: string; children: React.ReactNode }) {
   return (
-    <section className="card overflow-x-auto">
-      <div className="flex flex-wrap items-center justify-between gap-2 px-4 pt-3">
-        <h2 className="text-sm font-medium">Profit / loss by store ({BASE_CURRENCY}) · {from} to {to}</h2>
-        <div className="flex gap-1">
-          {(Object.keys(SPANS) as (keyof typeof SPANS)[]).map((k) => (
-            <Link key={k} href={link(k)} className={`rounded-md px-2 py-1 text-xs ${k === span ? "bg-accent-soft font-medium text-accent" : "text-muted hover:text-text"}`}>{SPANS[k]}</Link>
-          ))}
-        </div>
+    <div className={`card step space-y-3 p-4 ${left ? "step-todo" : "step-done"}`}>
+      <div className="flex items-center gap-2">
+        <span className={`step-num ${left ? "" : "step-num-done"}`}>{left ? n : "✓"}</span>
+        <h3 className="font-medium">{title}</h3>
+        {left > 0 && <span className="badge badge-warn ml-auto">{left} to do</span>}
       </div>
-      <table className="table num [&_td]:text-right [&_th]:text-right [&_th:first-child]:text-left">
-        <thead>
-          <tr><th>Store</th><th>Orders</th><th>Revenue</th><th>Cost of goods</th><th>Ads + media fee</th><th>Transaction fees</th><th>Profit / loss</th><th>Profit %</th><th>ROAS</th><th>POAS</th></tr>
-        </thead>
-        <tbody>
-          {rows.map(({ store, t }) =>
-            line(store.id, <Link className="font-medium hover:underline" href={`/?month=${month}&store=${store.id}`}>{store.name}</Link>, t, store.id === selected ? "bg-accent-soft" : ""),
-          )}
-          {sum.expenses > 0 && (
-            <tr>
-              <td className="text-left">Business expenses <Link href="/expenses" className="text-xs text-muted underline">details</Link></td>
-              <td colSpan={5}></td>
-              <td className="text-negative">−{money(sum.expenses, BASE_CURRENCY)}</td>
-              <td colSpan={3}></td>
-            </tr>
-          )}
-          {line("total", "Whole business", sum, "border-t-2 border-border font-semibold")}
-        </tbody>
-      </table>
-    </section>
+      <p className="text-xs text-muted">{hint}</p>
+      {children}
+    </div>
   );
 }

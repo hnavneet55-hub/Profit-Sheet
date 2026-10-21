@@ -146,8 +146,8 @@ export const adSpend = pgTable(
     amountBase: doublePrecision("amount_base"),
     // Cost per click from the ad account, same currency as amount. Clicks = amount / cpc.
     cpc: doublePrecision("cpc"),
-    // Conversion rate in %, entered by hand (Shopify's session-based rate isn't reliable).
-    // Without it, the dashboard falls back to the day's orders / clicks.
+    // Conversion rate in % as entered or imported earlier. No longer used: the dashboard
+    // calculates it as the day's orders ÷ clicks.
     cvr: doublePrecision("cvr"),
     note: text("note"),
     source: text("source").notNull().default("manual"), // manual | sheet (imported from a profit sheet)

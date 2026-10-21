@@ -24,8 +24,7 @@ export type DayRow = {
   expenses: number; // business expenses (salaries, software…); all-stores view only
   clicks: number; // ad spend ÷ CPC, where a CPC was entered
   clickSpend: number; // the ad spend those clicks came from (for the CPC)
-  clickOrders: number; // buyers among those clicks: entered CVR × clicks, else the day's orders
-  cvrCalculated: boolean; // some of the day's conversion rate is orders ÷ clicks, not entered
+  clickOrders: number; // the orders of the days those clicks are from
 };
 
 export type Ratios = {
@@ -34,9 +33,10 @@ export type Ratios = {
   profitPct: number | null;
   cogsPct: number | null;
   poas: number | null;
+  refundPct: number | null;
 };
 
-export function ratios(r: Pick<DayRow, "gross" | "revenue" | "cogs" | "adSpend" | "profit">): Ratios {
+export function ratios(r: Pick<DayRow, "gross" | "refunds" | "revenue" | "cogs" | "adSpend" | "profit">): Ratios {
   const div = (a: number, b: number) => (b ? a / b : null);
   // Matches the team's spreadsheet: % columns are relative to gross revenue.
   return {
@@ -45,6 +45,7 @@ export function ratios(r: Pick<DayRow, "gross" | "revenue" | "cogs" | "adSpend" 
     profitPct: div(r.profit, r.gross),
     cogsPct: div(r.cogs, r.gross),
     poas: div(r.profit, r.adSpend),
+    refundPct: div(r.refunds, r.gross),
   };
 }
 
@@ -67,10 +68,9 @@ const empty = (date: string): DayRow => ({
   clicks: 0,
   clickSpend: 0,
   clickOrders: 0,
-  cvrCalculated: false,
 });
 
-/** Cost per click and conversion rate (entered by hand, else orders ÷ ad clicks; never Shopify's). */
+/** Cost per click and conversion rate: the store's orders ÷ ad clicks (never Shopify's session-based rate). */
 export function adStats(d: Pick<DayRow, "clicks" | "clickSpend" | "clickOrders">): { cpc: number | null; cvr: number | null } {
   return { cpc: d.clicks ? d.clickSpend / d.clicks : null, cvr: d.clicks ? d.clickOrders / d.clicks : null };
 }
@@ -166,8 +166,6 @@ export async function buildSheet(opts: { storeId?: number; from: string; to: str
       fee: sql<number>`coalesce(sum(${schema.adSpend.amountBase} * coalesce(${schema.stores.mediaBuyerFeePct}, 0) / 100), 0)`,
       clicks: sql<number>`coalesce(sum(${schema.adSpend.amount} / ${schema.adSpend.cpc}) filter (where ${schema.adSpend.cpc} > 0), 0)`,
       clickSpend: sql<number>`coalesce(sum(${schema.adSpend.amountBase}) filter (where ${schema.adSpend.cpc} > 0), 0)`,
-      // Buyers implied by the entered rate; null when no row of the day has one.
-      buyers: sql<number | null>`sum(${schema.adSpend.amount} / ${schema.adSpend.cpc} * ${schema.adSpend.cvr} / 100) filter (where ${schema.adSpend.cpc} > 0 and ${schema.adSpend.cvr} is not null)`,
     })
     .from(schema.adSpend)
     .leftJoin(schema.stores, eq(schema.adSpend.storeId, schema.stores.id))
@@ -187,11 +185,7 @@ export async function buildSheet(opts: { storeId?: number; from: string; to: str
     if (Number(r.clicks) > 0) {
       d.clicks += Number(r.clicks);
       d.clickSpend += Number(r.clickSpend);
-      if (r.buyers != null) d.clickOrders += Number(r.buyers);
-      else {
-        d.clickOrders += ordersByStoreDay.get(`${r.storeId}|${r.date}`) ?? 0;
-        d.cvrCalculated = true;
-      }
+      d.clickOrders += ordersByStoreDay.get(`${r.storeId}|${r.date}`) ?? 0;
     }
   }
 
@@ -218,7 +212,6 @@ export async function buildSheet(opts: { storeId?: number; from: string; to: str
     d.revenue = d.gross - d.refunds;
     d.profit = d.revenue - d.cogs - d.adSpend - d.mediaFee - d.fees - d.expenses;
     for (const f of [...money, "expenses", "revenue", "profit", "orders", "ordersMissingCogs", "ordersInvoiced", "ordersDayWise", "ordersSheetCogs", "clicks", "clickOrders"] as const) total[f] += d[f];
-    total.cvrCalculated ||= d.cvrCalculated;
   }
   return { currency, days: [...days.values()], total };
 }

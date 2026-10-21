@@ -10,7 +10,7 @@ export type DayStatus = {
   adSpend: number; // in the ad account currency (summed; one account per store is assumed)
   adCurrency: string | null;
   adRows: number;
-  adNoCpc: number; // ad spend rows missing the CPC or the conversion rate
+  adNoCpc: number; // ad spend rows with an amount but no CPC
   refunds: number;
   sheetCogs: boolean; // the old profit sheet has a cost for this day
   dayWise: boolean; // up to the end of the old sheet: costed per day, so no invoices are expected
@@ -40,7 +40,7 @@ export async function dailyStatus(storeIds: number[], from: string, to: string):
   }
   for (const r of await readOnlyQuery(`
     select store_id, date::text as d, sum(amount) as amount, min(currency) as currency, count(*) as n,
-      count(*) filter (where cpc is null or cpc <= 0 or cvr is null) as no_cpc
+      count(*) filter (where amount > 0 and (cpc is null or cpc <= 0)) as no_cpc
     from ad_spend where store_id is not null and date ${range} group by 1, 2`)) {
     const c = cell(r.store_id, r.d);
     if (!c) continue;
@@ -63,6 +63,55 @@ export async function dailyStatus(storeIds: number[], from: string, to: string):
     select store_id, refund_date::text as d, count(*) as n from refunds where refund_date ${range} group by 1, 2`)) {
     const c = cell(r.store_id, r.d);
     if (c) c.refunds = Number(r.n);
+  }
+  return out;
+}
+
+export type StoreTodo = {
+  adDays: { date: string; orders: number }[]; // days with no ad spend entered, from the store's first order or ad spend on
+  cpcRows: { id: number; date: string; amount: number; currency: string }[]; // ad spend entered without a CPC
+  orders: number; // orders costed one by one (after the old sheet ends)
+  notInvoiced: number; // of those, not on a supplier invoice yet
+  missingCost: number; // of those, with no cost at all (within the missing-cost window)
+  pending: { id: number; label: string }[]; // invoices read but not reviewed yet
+  count: number; // things to do, for the store tabs
+};
+
+/** What's left to enter for each store between `from` and `to`. */
+export async function storeTodos(storeIds: number[], from: string, to: string, missingFrom: string): Promise<Map<number, StoreTodo>> {
+  const status = await dailyStatus(storeIds, from, to);
+  const ids = storeIds.length ? storeIds.join(",") : "0";
+  if (![from, to].every((d) => /^\d{4}-\d{2}-\d{2}$/.test(d))) throw new Error("Invalid date");
+  const range = `between '${from}' and '${to}'`;
+  const first = new Map(
+    (await readOnlyQuery(`
+      select store_id, min(d)::text as d from (
+        select store_id, min(order_date) d from orders group by 1
+        union all select store_id, min(date) from ad_spend where store_id is not null group by 1
+      ) x group by 1`)).map((r) => [Number(r.store_id), String(r.d)]),
+  );
+  const cpcRows = await readOnlyQuery(`
+    select id, store_id, date::text as d, amount, currency from ad_spend
+    where store_id in (${ids}) and date ${range} and amount > 0 and (cpc is null or cpc <= 0) order by date`);
+  const pending = await readOnlyQuery(`
+    select id, store_id, coalesce(supplier, filename, 'Invoice #' || id) as label from supplier_invoices
+    where status = 'pending' and store_id in (${ids}) order by created_at`);
+  const out = new Map<number, StoreTodo>();
+  for (const id of storeIds) {
+    const start = first.get(id);
+    const cells = [...status.get(id)!.entries()];
+    const after = cells.filter(([, c]) => !c.dayWise);
+    const t: StoreTodo = {
+      adDays: start ? cells.filter(([d, c]) => d >= start && c.adRows === 0).map(([date, c]) => ({ date, orders: c.orders })) : [],
+      cpcRows: cpcRows.filter((r) => Number(r.store_id) === id).map((r) => ({ id: Number(r.id), date: String(r.d), amount: Number(r.amount), currency: String(r.currency) })),
+      orders: after.reduce((n, [, c]) => n + c.orders, 0),
+      notInvoiced: after.reduce((n, [, c]) => n + c.orders - c.invoiced, 0),
+      missingCost: after.reduce((n, [d, c]) => n + (d >= missingFrom ? c.missingCost : 0), 0),
+      pending: pending.filter((r) => Number(r.store_id) === id).map((r) => ({ id: Number(r.id), label: String(r.label) })),
+      count: 0,
+    };
+    t.count = t.adDays.length + t.cpcRows.length + t.pending.length + (t.notInvoiced > 0 ? 1 : 0);
+    out.set(id, t);
   }
   return out;
 }

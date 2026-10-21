@@ -64,11 +64,11 @@ export default async function DailyCheckPage(props: PageProps<"/daily">) {
           return (
             <div key={store.id} className="card space-y-1 px-4 py-3 text-sm">
               <div className="flex items-center justify-between gap-2">
-                <span className="font-medium">{store.name}</span>
+                <Link href={`/?store=${store.id}`} className="font-medium hover:underline">{store.name}</Link>
                 <span className={ok ? "text-positive" : "text-warn-text"}>{ok ? "✓ Up to date" : "Needs attention"}</span>
               </div>
               <div className={noAds ? "text-negative" : "text-muted"}>{noAds ? `${noAds} day${noAds === 1 ? "" : "s"} without ad spend` : "Ad spend entered every day"}</div>
-              {noCpc > 0 && <div className="text-warn-text">{noCpc} day{noCpc === 1 ? "" : "s"} without CPC or CVR</div>}
+              {noCpc > 0 && <div className="text-warn-text">{noCpc} day{noCpc === 1 ? "" : "s"} without CPC</div>}
               <div className={notInvoiced ? "text-warn-text" : "text-muted"}>
                 {orders === 0 ? (dayWise ? "Cost of goods from the old sheet" : "No orders") : notInvoiced ? `${notInvoiced} of ${orders} orders not invoiced` : `All ${orders} orders invoiced`}
               </div>
@@ -115,7 +115,7 @@ function Cell({ storeId, date, c }: { storeId: number; date: string; c: DayStatu
       <div className={c.adRows ? "text-positive" : c.orders ? "font-medium text-negative" : "text-muted"}>
         {c.adRows ? `✓ Ads ${money(c.adSpend, c.adCurrency ?? "USD")}` : c.orders ? "✗ No ad spend" : "No ad spend"}
       </div>
-      {c.adNoCpc > 0 && <div className="text-xs text-warn-text">CPC or CVR missing</div>}
+      {c.adNoCpc > 0 && <div className="text-xs text-warn-text">CPC missing</div>}
       <div>
         {c.orders === 0 ? (
           <span className="text-muted">No orders</span>

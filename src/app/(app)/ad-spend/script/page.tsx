@@ -59,7 +59,8 @@ export default async function AdsScriptPage(props: PageProps<"/ad-spend/script">
             <p>Check the account name and ID at the top right. It must be {store.name}&apos;s account, the one that bills in <b>{store.reportingCurrency}</b>. If you use a manager (MCC) account, click the account name and pick {store.name}&apos;s account from the list first.</p>
           </Step>
           <Step n={3} title="Open Scripts">
-            <p>In the menu on the left, click <b>Tools</b> (the wrench icon) → <b>Bulk actions</b> → <b>Scripts</b>.</p>
+            <div><ScriptsButton /></div>
+            <p>Or, in the menu on the left, click <b>Tools</b> (the wrench icon) → <b>Bulk actions</b> → <b>Scripts</b>. Check it&apos;s still {store.name}&apos;s account at the top right.</p>
             <p>Click the blue <b>+</b> button and choose <b>New script</b>. An editor opens with a few lines of sample code.</p>
           </Step>
           <Step n={4} title="Paste the script">
@@ -76,7 +77,7 @@ export default async function AdsScriptPage(props: PageProps<"/ad-spend/script">
             <p>Wait about 10 seconds, then open <b>Logs</b> under the editor. The last line should say <code>Sent {ADS_FIRST_DAYS} day(s): 200 {"{"}&quot;saved&quot;:…</code>. That&apos;s the last {ADS_FIRST_DAYS} days arriving here.</p>
           </Step>
           <Step n={7} title="Make it run every day">
-            <p>Click <b>Save</b>, then <b>Close</b>. You&apos;re back at the list of scripts.</p>
+            <p>Click <b>Save</b>, then <b>Close</b>. You&apos;re back at the list of scripts. (Lost it? <ScriptsButton small />)</p>
             <p>In the <b>Frequency</b> column of &quot;Profit Sheet&quot;, click the pencil, choose <b>Daily</b> and a time around <b>06:00</b>, and click <b>Save</b>. From now on it sends yesterday every morning.</p>
           </Step>
           <Step n={8} title="Come back here and check">
@@ -163,5 +164,16 @@ function Step({ n, title, children }: { n: number; title: string; children: Reac
         <div className="space-y-1.5 text-muted [&_b]:text-text [&_code]:text-text">{children}</div>
       </div>
     </li>
+  );
+}
+
+// Google Ads' Scripts list; it opens in the account last used in Google Ads.
+const SCRIPTS_URL = "https://ads.google.com/aw/bulk/scripts";
+
+function ScriptsButton({ small }: { small?: boolean }) {
+  return small ? (
+    <a className="text-accent underline" href={SCRIPTS_URL} target="_blank" rel="noreferrer">Open Scripts in Google Ads ↗</a>
+  ) : (
+    <a className="btn" href={SCRIPTS_URL} target="_blank" rel="noreferrer">Open Scripts in Google Ads ↗</a>
   );
 }

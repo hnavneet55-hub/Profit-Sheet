@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { SESSION_COOKIE, sessionToken } from "@/lib/auth";
+import { SESSION_COOKIE, sessionUser } from "@/lib/auth";
 
 export async function proxy(request: NextRequest) {
   if (!process.env.DASHBOARD_PASSWORD) {
@@ -7,7 +7,7 @@ export async function proxy(request: NextRequest) {
     if (process.env.NODE_ENV !== "production") return NextResponse.next();
     return new NextResponse("Set DASHBOARD_PASSWORD and APP_SECRET to use the dashboard.", { status: 503 });
   }
-  if (request.cookies.get(SESSION_COOKIE)?.value === (await sessionToken())) return NextResponse.next();
+  if (await sessionUser(request.cookies.get(SESSION_COOKIE)?.value)) return NextResponse.next();
   const url = request.nextUrl.clone();
   url.pathname = "/login";
   url.search = `?next=${encodeURIComponent(request.nextUrl.pathname)}`;

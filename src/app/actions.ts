@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { and, eq, inArray } from "drizzle-orm";
 import { getDb, schema } from "@/db";
-import { SESSION_COOKIE, sessionToken } from "@/lib/auth";
+import { SESSION_COOKIE, findAccount, sessionToken } from "@/lib/auth";
 import { encrypt } from "@/lib/crypto";
 import { toBase } from "@/lib/fx";
 import { recomputeForSkus, recomputeForStore } from "@/lib/costs";
@@ -27,9 +27,9 @@ const numOr = (f: FormData, k: string, d = 0) => {
 // ---- Login ----
 
 export async function login(_: string | null, form: FormData): Promise<string | null> {
-  const user = process.env.DASHBOARD_USER;
-  if ((user && str(form, "user") !== user) || str(form, "password") !== process.env.DASHBOARD_PASSWORD) return "Wrong user ID or password";
-  (await cookies()).set(SESSION_COOKIE, await sessionToken(), {
+  const account = findAccount(str(form, "user"), str(form, "password"));
+  if (!account) return "Wrong user ID or password";
+  (await cookies()).set(SESSION_COOKIE, await sessionToken(account), {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
     sameSite: "lax",

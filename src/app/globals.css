@@ -19,6 +19,7 @@
   --chart-pos: #2a78d6;
   --chart-neg: #d6453d;
   --grid: #e9edf2;
+  --ads-bg: #f3f6fd;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -41,6 +42,7 @@
     --chart-pos: #3987e5;
     --chart-neg: #e66767;
     --grid: #252b36;
+    --ads-bg: #19202d;
   }
 }
 
@@ -135,6 +137,18 @@ body {
   }
   .table tbody tr:hover td {
     @apply bg-surface-2;
+  }
+  .table .grp-start {
+    @apply border-l border-l-border;
+  }
+  .table .grp-ads {
+    @apply bg-[var(--ads-bg)];
+  }
+  .table .grp-head th {
+    @apply border-b-0 pb-0 text-[11px] font-semibold tracking-wide uppercase;
+  }
+  .table .grp-head th.grp-ads {
+    @apply text-accent;
   }
   .table .total-row td {
     @apply bg-accent-soft;

@@ -24,9 +24,11 @@ export function parseMonth(v: unknown) {
 
 export type Kpi = { label: string; value: string; sub: string; tone?: "pos" | "neg" };
 
-export function Kpis({ items }: { items: Kpi[] }) {
+export function Kpis({ title, items }: { title?: string; items: Kpi[] }) {
   return (
-    <section className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+    <section className="space-y-2">
+      {title && <h3 className="text-xs font-semibold tracking-wide text-muted uppercase">{title}</h3>}
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-4">
       {items.map((k) => (
         <div key={k.label} className={`card px-4 py-3 ${k.tone === "neg" ? "kpi-neg" : k.tone === "pos" ? "kpi-pos" : ""}`}>
           <div className="text-xs font-medium text-muted">{k.label}</div>
@@ -34,44 +36,61 @@ export function Kpis({ items }: { items: Kpi[] }) {
           <div className="num mt-0.5 text-xs text-muted">{k.sub}</div>
         </div>
       ))}
+      </div>
     </section>
   );
 }
 
+// Column sections of the daily sheet; advertising is kept apart from the other costs.
+const GROUP_CLASS = { sales: "", costs: "grp-costs", ads: "grp-ads", result: "grp-result" } as const;
+
 export function SheetTable({ days, total, currency, month, lastDay, withExpenses, costCutoff, missingCost }: { days: DayRow[]; total: DayRow; currency: string; month: string; lastDay: string; withExpenses: boolean; costCutoff: string; missingCost: number }) {
-  const cols = ["Date", "Gross revenue", "Refunds", "Refund %", "Revenue", "Cost of goods", "Ad spend", "Media buyer fee", "Transaction fees", ...(withExpenses ? ["Business expenses"] : []), "Profit", "ROAS", "Gross ROAS", "Profit %", "COG %", "POAS", "CPC", "CVR %"];
+  const groups: { key: keyof typeof GROUP_CLASS; label: string; cols: string[] }[] = [
+    { key: "sales", label: "Sales", cols: ["Gross revenue", "Refunds", "Refund %", "Revenue"] },
+    { key: "costs", label: "Costs", cols: ["Cost of goods", "COG %", "Transaction fees", ...(withExpenses ? ["Business expenses"] : [])] },
+    { key: "ads", label: "Advertising", cols: ["Ad spend", "Media buyer fee", "CPC", "CVR %", "ROAS", "Gross ROAS"] },
+    { key: "result", label: "Result", cols: ["Profit", "Profit %", "POAS"] },
+  ];
   const row = (d: DayRow, label: string, isTotal = false) => {
     const r = ratios(d);
     const a = adStats(d);
     const empty = !isTotal && d.date > lastDay;
     const m = (n: number) => (empty ? "" : money(n, currency));
+    const c = (g: keyof typeof GROUP_CLASS, first = false) => `${GROUP_CLASS[g]} ${first ? "grp-start" : ""}`;
     return (
       <tr key={label} className={isTotal ? "total-row font-semibold" : empty ? "text-muted" : ""}>
         <td className="text-left">{label}</td>
-        <td>{m(d.gross)}</td>
+        <td className="grp-start">{m(d.gross)}</td>
         <td className={d.refunds > 0 && !empty ? "text-negative" : ""}>{m(d.refunds)}</td>
         <td className={!empty && (r.refundPct ?? 0) >= 0.1 ? "text-negative" : ""}>{empty || !d.gross ? "" : pct(r.refundPct)}</td>
         <td>{m(d.revenue)}</td>
-        <td>{m(d.cogs)}{!empty && d.ordersSheetCogs > 0 && !isTotal && <span title="Cost of goods from the old profit sheet" className="ml-1 text-xs text-muted">sheet</span>}{!empty && d.ordersMissingCogs > 0 && (isTotal ? missingCost > 0 : d.date >= costCutoff) && <span title={`${isTotal ? missingCost : d.ordersMissingCogs} orders without any cost`} className="ml-1 text-warn-text">⚠</span>}</td>
-        <td>{m(d.adSpend)}</td>
-        <td>{m(d.mediaFee)}</td>
-        <td>{m(d.fees)}</td>
-        {withExpenses && <td>{d.expenses ? m(d.expenses) : ""}</td>}
-        <td className={`font-semibold ${empty ? "" : d.profit < 0 ? "text-negative" : d.profit > 0 ? "text-positive" : ""}`}>{m(d.profit)}</td>
-        <td>{empty ? "" : ratio(r.roas)}</td>
-        <td>{empty ? "" : ratio(r.grossRoas)}</td>
-        <td>{empty ? "" : pct(r.profitPct)}</td>
-        <td>{empty ? "" : pct(r.cogsPct)}</td>
-        <td>{empty ? "" : ratio(r.poas)}</td>
-        <td>{empty || a.cpc == null ? (!empty && d.adSpend > 0 ? <span className="text-warn-text" title="Enter the CPC with the ad spend">—</span> : "") : money(a.cpc, currency)}</td>
-        <td title="Orders ÷ clicks">{empty || a.cvr == null ? "" : pct(a.cvr)}</td>
+        <td className={c("costs", true)}>{m(d.cogs)}{!empty && d.ordersSheetCogs > 0 && !isTotal && <span title="Cost of goods from the old profit sheet" className="ml-1 text-xs text-muted">sheet</span>}{!empty && d.ordersMissingCogs > 0 && (isTotal ? missingCost > 0 : d.date >= costCutoff) && <span title={`${isTotal ? missingCost : d.ordersMissingCogs} orders without any cost`} className="ml-1 text-warn-text">⚠</span>}</td>
+        <td className={c("costs")}>{empty ? "" : pct(r.cogsPct)}</td>
+        <td className={c("costs")}>{m(d.fees)}</td>
+        {withExpenses && <td className={c("costs")}>{d.expenses ? m(d.expenses) : ""}</td>}
+        <td className={c("ads", true)}>{m(d.adSpend)}</td>
+        <td className={c("ads")}>{m(d.mediaFee)}</td>
+        <td className={c("ads")}>{empty || a.cpc == null ? (!empty && d.adSpend > 0 ? <span className="text-warn-text" title="Enter the CPC with the ad spend">—</span> : "") : money(a.cpc, currency)}</td>
+        <td className={c("ads")} title="Orders ÷ clicks">{empty || a.cvr == null ? "" : pct(a.cvr)}</td>
+        <td className={c("ads")}>{empty ? "" : ratio(r.roas)}</td>
+        <td className={c("ads")}>{empty ? "" : ratio(r.grossRoas)}</td>
+        <td className={`${c("result", true)} font-semibold ${empty ? "" : d.profit < 0 ? "text-negative" : d.profit > 0 ? "text-positive" : ""}`}>{m(d.profit)}</td>
+        <td className={c("result")}>{empty ? "" : pct(r.profitPct)}</td>
+        <td className={c("result")}>{empty ? "" : ratio(r.poas)}</td>
       </tr>
     );
   };
   return (
     <table className="table num [&_td]:text-right [&_th]:text-right [&_th:first-child]:text-left">
       <thead>
-        <tr>{cols.map((c) => <th key={c}>{c}</th>)}</tr>
+        <tr className="grp-head">
+          <th></th>
+          {groups.map((g) => <th key={g.key} colSpan={g.cols.length} className={`${GROUP_CLASS[g.key]} grp-start !text-center`}>{g.label}</th>)}
+        </tr>
+        <tr>
+          <th>Date</th>
+          {groups.flatMap((g) => g.cols.map((col, i) => <th key={col} className={`${GROUP_CLASS[g.key]} ${i === 0 ? "grp-start" : ""}`}>{col}</th>))}
+        </tr>
       </thead>
       <tbody>
         {days.map((d) => row(d, new Date(`${d.date}T12:00:00Z`).toLocaleDateString("en-GB", { timeZone: "UTC" })))}
@@ -108,7 +127,8 @@ export async function StoreBreakdown({ month, span, stores, link }: {
         <td>{money(d.revenue, BASE_CURRENCY)}</td>
         <td>{pct(r.refundPct)}</td>
         <td>{money(d.cogs, BASE_CURRENCY)}<span className="ml-1 text-xs text-muted">{d.orders > d.ordersDayWise ? `${Math.round((d.ordersInvoiced / (d.orders - d.ordersDayWise)) * 100)}% inv.` : d.orders ? "sheet" : ""}</span></td>
-        <td>{money(d.adSpend + d.mediaFee, BASE_CURRENCY)}</td>
+        <td className="grp-ads grp-start">{money(d.adSpend, BASE_CURRENCY)}</td>
+        <td className="grp-ads">{money(d.mediaFee, BASE_CURRENCY)}</td>
         <td>{money(d.fees, BASE_CURRENCY)}</td>
         <td className={`font-semibold ${d.profit < 0 ? "text-negative" : "text-positive"}`}>{money(d.profit, BASE_CURRENCY)}</td>
         <td>{pct(r.profitPct)}</td>
@@ -129,7 +149,7 @@ export async function StoreBreakdown({ month, span, stores, link }: {
       </div>
       <table className="table num [&_td]:text-right [&_th]:text-right [&_th:first-child]:text-left">
         <thead>
-          <tr><th>Store</th><th>Orders</th><th>Revenue</th><th>Refund %</th><th>Cost of goods</th><th>Ads + media fee</th><th>Transaction fees</th><th>Profit / loss</th><th>Profit %</th><th>ROAS</th><th>POAS</th></tr>
+          <tr><th>Store</th><th>Orders</th><th>Revenue</th><th>Refund %</th><th>Cost of goods</th><th className="grp-ads grp-start">Ad spend</th><th className="grp-ads">Media buyer fee</th><th>Transaction fees</th><th>Profit / loss</th><th>Profit %</th><th>ROAS</th><th>POAS</th></tr>
         </thead>
         <tbody>
           {rows.map(({ store, t }) =>
@@ -138,7 +158,7 @@ export async function StoreBreakdown({ month, span, stores, link }: {
           {sum.expenses > 0 && (
             <tr>
               <td className="text-left">Business expenses <Link href="/expenses" className="text-xs text-muted underline">details</Link></td>
-              <td colSpan={6}></td>
+              <td colSpan={7}></td>
               <td className="text-negative">−{money(sum.expenses, BASE_CURRENCY)}</td>
               <td colSpan={3}></td>
             </tr>

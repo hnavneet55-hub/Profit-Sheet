@@ -15,6 +15,6 @@ export async function proxy(request: NextRequest) {
 }
 
 export const config = {
-  // Cron routes check CRON_SECRET themselves.
-  matcher: ["/((?!login|api/cron|_next/static|_next/image|favicon.ico).*)"],
+  // Cron routes check CRON_SECRET themselves; the Google Ads import checks its per-store token.
+  matcher: ["/((?!login|api/cron|api/ads|_next/static|_next/image|favicon.ico).*)"],
 };

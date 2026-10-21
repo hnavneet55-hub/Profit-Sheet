@@ -150,7 +150,7 @@ export const adSpend = pgTable(
     // calculates it as the day's orders ÷ clicks.
     cvr: doublePrecision("cvr"),
     note: text("note"),
-    source: text("source").notNull().default("manual"), // manual | sheet (imported from a profit sheet)
+    source: text("source").notNull().default("manual"), // manual | sheet (imported from a profit sheet) | ads-script (sent by Google Ads)
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index("ad_spend_date_idx").on(t.date)],

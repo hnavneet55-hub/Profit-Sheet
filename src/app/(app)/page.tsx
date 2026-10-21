@@ -2,6 +2,8 @@ import Link from "next/link";
 import { adStats, buildSheet, ratios } from "@/lib/report";
 import { listStores } from "@/lib/stores";
 import { storeTodos, type StoreTodo } from "@/lib/checklist";
+import { readOnlyQuery } from "@/db";
+import { ADS_SCRIPT_SOURCE } from "@/lib/ads-script";
 import { addDays, today } from "@/lib/dates";
 import { money, pct, ratio, monthLabel, shortDate } from "@/lib/format";
 import { MISSING_COST_DAYS } from "@/lib/config";
@@ -34,6 +36,8 @@ export default async function StoreSheetPage(props: PageProps<"/">) {
   const todos = await storeTodos(stores.map((s) => s.id), addDays(todoTo, -(TODO_DAYS - 1)), todoTo, costCutoff);
   const todo = todos.get(store.id)!;
   const i = stores.indexOf(store);
+  const [ads] = await readOnlyQuery(`select max(created_at) as at from ad_spend where source = '${ADS_SCRIPT_SOURCE}' and store_id = ${store.id}`);
+  const adsAt = ads?.at ? new Date(String(ads.at)) : null;
   const next = [...stores.slice(i + 1), ...stores.slice(0, i)].find((s) => todos.get(s.id)!.count > 0);
 
   const { from, to } = monthRange(month);
@@ -72,7 +76,7 @@ export default async function StoreSheetPage(props: PageProps<"/">) {
         </form>
       </header>
 
-      <Checklist store={store} todo={todo} next={next && { name: next.name, href: qs(month, next.id) }} />
+      <Checklist store={store} todo={todo} adsAt={adsAt} next={next && { name: next.name, href: qs(month, next.id) }} />
 
       <div className="flex flex-wrap items-center justify-between gap-2 pt-2">
         <h2 className="text-lg font-semibold">Profit sheet · {monthLabel(month)}</h2>
@@ -83,13 +87,21 @@ export default async function StoreSheetPage(props: PageProps<"/">) {
       </div>
 
       <Kpis
+        title="Sales & profit"
         items={[
           { label: "Revenue", value: money(t.revenue, cur), sub: `after ${money(t.refunds, cur)} refunds (${pct(tr.refundPct)})` },
           { label: "Profit", value: money(t.profit, cur), sub: `${pct(tr.profitPct)} of gross`, tone: t.profit < 0 ? "neg" : "pos" },
-          { label: "Ad spend", value: money(t.adSpend, cur), sub: `+ ${money(t.mediaFee, cur)} media buyer fee` },
-          { label: "ROAS", value: ratio(tr.roas), sub: `gross ${ratio(tr.grossRoas)} · CPC ${ta.cpc == null ? "—" : money(ta.cpc, cur)} · CVR ${pct(ta.cvr)}` },
-          { label: "POAS", value: ratio(tr.poas), sub: "profit ÷ ad spend" },
           { label: "Orders", value: t.orders.toLocaleString("en-GB"), sub: `COGS ${pct(tr.cogsPct)} of gross` },
+          { label: "POAS", value: ratio(tr.poas), sub: "profit ÷ ad spend" },
+        ]}
+      />
+      <Kpis
+        title="Advertising"
+        items={[
+          { label: "Ad spend", value: money(t.adSpend, cur), sub: "from Google Ads" },
+          { label: "Media buyer fee", value: money(t.mediaFee, cur), sub: `total ad cost ${money(t.adSpend + t.mediaFee, cur)}` },
+          { label: "ROAS", value: ratio(tr.roas), sub: `gross ROAS ${ratio(tr.grossRoas)}` },
+          { label: "CPC · CVR", value: ta.cpc == null ? "—" : money(ta.cpc, cur), sub: `CVR ${pct(ta.cvr)} (orders ÷ clicks)` },
         ]}
       />
 
@@ -108,7 +120,7 @@ export default async function StoreSheetPage(props: PageProps<"/">) {
 type Store = Awaited<ReturnType<typeof listStores>>[number];
 
 /** The data-entry steps for one store, with the inputs right there. */
-function Checklist({ store, todo, next }: { store: Store; todo: StoreTodo; next?: { name: string; href: string } }) {
+function Checklist({ store, todo, adsAt, next }: { store: Store; todo: StoreTodo; adsAt: Date | null; next?: { name: string; href: string } }) {
   const cur = store.reportingCurrency;
   const adLeft = todo.adDays.length + todo.cpcRows.length;
   const invLeft = todo.pending.length + (todo.notInvoiced > 0 ? 1 : 0);
@@ -124,8 +136,9 @@ function Checklist({ store, todo, next }: { store: Store; todo: StoreTodo; next?
 
   return (
     <section className="grid gap-3 lg:grid-cols-3">
-      <Step n={1} title="Ad spend" left={adLeft} hint={`From Google Ads, in ${cur}: the day's cost and the average CPC.`}>
+      <Step n={1} title="Ad spend" left={adLeft} hint={adsAt ? `Automatic from Google Ads, last received ${adsAt.toLocaleString("en-GB")}.` : `From Google Ads, in ${cur}: the day's cost and the average CPC.`}>
         {adLeft === 0 && <p className="text-sm text-muted">Entered for every day.</p>}
+        {!adsAt && <Link className="block text-xs text-accent underline" href={`/ad-spend/script?store=${store.id}`}>Make this automatic: connect Google Ads →</Link>}
         {todo.adDays.length > 0 && (
           <ul className="max-h-96 space-y-2 overflow-y-auto">
             {todo.adDays.slice().reverse().map((d) => (

@@ -23,7 +23,7 @@ export default async function AdSpendPage(props: PageProps<"/ad-spend">) {
     <div className="space-y-5">
       <header>
         <h1 className="text-xl font-semibold">Ad spend{store ? ` · ${store.name}` : ""}</h1>
-        <p className="text-sm text-muted">Enter the day&apos;s cost and average CPC from Google Ads. The conversion rate is calculated from the store&apos;s orders ÷ clicks.{store && <> <Link className="underline" href={`/?store=${store.id}`}>Back to {store.name}</Link></>}</p>
+        <p className="text-sm text-muted">Enter the day&apos;s cost and average CPC from Google Ads. The conversion rate is calculated from the store&apos;s orders ÷ clicks.{store && <> <Link className="underline" href={`/?store=${store.id}`}>Back to {store.name}</Link></>} · <Link className="text-accent underline" href={`/ad-spend/script${store ? `?store=${store.id}` : ""}`}>Get it from Google Ads automatically</Link></p>
       </header>
       <form action={addAdSpend} className="card space-y-4 p-5">
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">

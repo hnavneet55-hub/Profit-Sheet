@@ -48,13 +48,21 @@ export default async function BusinessPage(props: PageProps<"/business">) {
       )}
 
       <Kpis
+        title="Sales & profit"
         items={[
           { label: "Revenue", value: money(t.revenue, BASE_CURRENCY), sub: `after ${money(t.refunds, BASE_CURRENCY)} refunds (${pct(tr.refundPct)})` },
           { label: "Net profit", value: money(t.profit, BASE_CURRENCY), sub: `after ${money(t.expenses, BASE_CURRENCY)} business expenses`, tone: t.profit < 0 ? "neg" : "pos" },
-          { label: "Ad spend", value: money(t.adSpend, BASE_CURRENCY), sub: `+ ${money(t.mediaFee, BASE_CURRENCY)} media buyer fee` },
-          { label: "ROAS", value: ratio(tr.roas), sub: `gross ${ratio(tr.grossRoas)} · CPC ${ta.cpc == null ? "—" : money(ta.cpc, BASE_CURRENCY)} · CVR ${pct(ta.cvr)}` },
-          { label: "POAS", value: ratio(tr.poas), sub: "profit ÷ ad spend" },
           { label: "Orders", value: t.orders.toLocaleString("en-GB"), sub: `COGS ${pct(tr.cogsPct)} of gross` },
+          { label: "POAS", value: ratio(tr.poas), sub: "profit ÷ ad spend" },
+        ]}
+      />
+      <Kpis
+        title="Advertising"
+        items={[
+          { label: "Ad spend", value: money(t.adSpend, BASE_CURRENCY), sub: "from Google Ads" },
+          { label: "Media buyer fee", value: money(t.mediaFee, BASE_CURRENCY), sub: `total ad cost ${money(t.adSpend + t.mediaFee, BASE_CURRENCY)}` },
+          { label: "ROAS", value: ratio(tr.roas), sub: `gross ROAS ${ratio(tr.grossRoas)}` },
+          { label: "CPC · CVR", value: ta.cpc == null ? "—" : money(ta.cpc, BASE_CURRENCY), sub: `CVR ${pct(ta.cvr)} (orders ÷ clicks)` },
         ]}
       />
 

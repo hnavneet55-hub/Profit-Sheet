@@ -28,7 +28,7 @@ export function Kpis({ title, items }: { title?: string; items: Kpi[] }) {
   return (
     <section className="space-y-2">
       {title && <h3 className="text-xs font-semibold tracking-wide text-muted uppercase">{title}</h3>}
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
       {items.map((k) => (
         <div key={k.label} className={`card px-4 py-3 ${k.tone === "neg" ? "kpi-neg" : k.tone === "pos" ? "kpi-pos" : ""}`}>
           <div className="text-xs font-medium text-muted">{k.label}</div>

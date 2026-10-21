@@ -45,6 +45,14 @@ export async function logout() {
   redirect("/login");
 }
 
+/** Hides or shows the side menu, so the sheets can use the whole screen. */
+export async function toggleMenu() {
+  const jar = await cookies();
+  if (jar.get("ps_menu")?.value === "hidden") jar.delete("ps_menu");
+  else jar.set("ps_menu", "hidden", { maxAge: 60 * 60 * 24 * 365, path: "/", sameSite: "lax" });
+  revalidatePath("/", "layout");
+}
+
 // ---- Stores ----
 
 export async function saveStore(form: FormData) {

@@ -72,6 +72,7 @@ export type StoreTodo = {
   cpcRows: { id: number; date: string; amount: number; currency: string }[]; // ad spend entered without a CPC
   orders: number; // orders costed one by one (after the old sheet ends)
   notInvoiced: number; // of those, not on a supplier invoice yet
+  invoiceDays: { date: string; orders: number; notInvoiced: number; missingCost: number }[]; // days with orders still to invoice, newest first
   missingCost: number; // of those, with no cost at all (within the missing-cost window)
   pending: { id: number; label: string }[]; // invoices read but not reviewed yet
   count: number; // things to do, for the store tabs
@@ -107,10 +108,14 @@ export async function storeTodos(storeIds: number[], from: string, to: string, m
       orders: after.reduce((n, [, c]) => n + c.orders, 0),
       notInvoiced: after.reduce((n, [, c]) => n + c.orders - c.invoiced, 0),
       missingCost: after.reduce((n, [d, c]) => n + (d >= missingFrom ? c.missingCost : 0), 0),
+      invoiceDays: after
+        .filter(([, c]) => c.orders > c.invoiced)
+        .map(([date, c]) => ({ date, orders: c.orders, notInvoiced: c.orders - c.invoiced, missingCost: date >= missingFrom ? c.missingCost : 0 }))
+        .reverse(),
       pending: pending.filter((r) => Number(r.store_id) === id).map((r) => ({ id: Number(r.id), label: String(r.label) })),
       count: 0,
     };
-    t.count = t.adDays.length + t.cpcRows.length + t.pending.length + (t.notInvoiced > 0 ? 1 : 0);
+    t.count = t.adDays.length + t.cpcRows.length + t.pending.length + t.invoiceDays.length;
     out.set(id, t);
   }
   return out;

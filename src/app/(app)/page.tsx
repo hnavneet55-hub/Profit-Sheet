@@ -124,7 +124,7 @@ type Store = Awaited<ReturnType<typeof listStores>>[number];
 function Checklist({ store, todo, adsAt, adsDiffer, next }: { store: Store; todo: StoreTodo; adsAt: Date | null; adsDiffer: number; next?: { name: string; href: string } }) {
   const cur = store.reportingCurrency;
   const adLeft = todo.adDays.length + todo.cpcRows.length;
-  const invLeft = todo.pending.length + (todo.notInvoiced > 0 ? 1 : 0);
+  const invLeft = todo.pending.length + todo.invoiceDays.length;
 
   if (todo.count === 0 && !store.lastSyncError) {
     return (
@@ -178,21 +178,37 @@ function Checklist({ store, todo, adsAt, adsDiffer, next }: { store: Store; todo
         {todo.adDays.length > 3 && <Link className="text-xs text-accent underline" href={`/ad-spend?store=${store.id}`}>Paste many days at once</Link>}
       </Step>
 
-      <Step n={2} title="Cost of goods" left={invLeft} hint="Upload the supplier's invoice or export for this store. Claude matches it to the orders.">
+      <Step n={2} title="Cost of goods" left={invLeft} hint="Upload each day's supplier invoice or export. One file can cover several days; every day it covers ticks off.">
         {todo.orders === 0 ? (
           <p className="text-sm text-muted">No orders to invoice: these days are costed from the old profit sheet.</p>
+        ) : todo.notInvoiced === 0 ? (
+          <p className="text-sm text-positive">✓ All {todo.orders} orders invoiced</p>
         ) : (
-          <p className={`text-sm ${todo.notInvoiced ? "text-warn-text" : "text-positive"}`}>
-            {todo.notInvoiced ? `${todo.notInvoiced} of ${todo.orders} orders not on an invoice yet` : `✓ All ${todo.orders} orders invoiced`}
-            {todo.missingCost > 0 && <span className="block text-negative">⚠ {todo.missingCost} with no cost at all, so profit is overstated</span>}
+          <p className="text-sm text-muted">
+            {todo.notInvoiced} of {todo.orders} orders on {todo.invoiceDays.length} day{todo.invoiceDays.length === 1 ? "" : "s"} aren&apos;t on an invoice yet; their cost of goods is an estimate until then.
+            {todo.missingCost > 0 && <span className="block text-negative">⚠ {todo.missingCost} of them have no cost at all, so profit is overstated.</span>}
           </p>
         )}
-        {todo.notInvoiced > 0 && (
-          <form action={uploadInvoice} className="space-y-2">
-            <input type="hidden" name="storeId" value={store.id} />
-            <input type="file" name="file" required accept=".pdf,application/pdf,.xlsx,.xls,.xlsm,.csv,.ods,image/png,image/jpeg,image/webp" className="input" aria-label="Invoice file" />
-            <SubmitButton pendingLabel="Claude is reading the invoice…">Upload invoice</SubmitButton>
-          </form>
+        {todo.invoiceDays.length > 0 && (
+          <ul className="max-h-96 space-y-2 overflow-y-auto">
+            {todo.invoiceDays.map((d) => (
+              <li key={d.date} className="space-y-1">
+                <div className="flex flex-wrap items-baseline justify-between gap-x-2 text-sm">
+                  <span className="num font-medium">{dayLabel(d.date)}</span>
+                  <Link className="text-xs text-warn-text hover:underline" href={`/orders?store=${store.id}&from=${d.date}&to=${d.date}&invoiced=0`}>
+                    {d.notInvoiced === d.orders ? `${d.orders} order${d.orders === 1 ? "" : "s"}, none invoiced` : `${d.notInvoiced} of ${d.orders} orders not invoiced`}
+                    {d.missingCost > 0 && <span className="text-negative"> · {d.missingCost} no cost</span>}
+                  </Link>
+                </div>
+                <form action={uploadInvoice} className="flex flex-wrap items-center gap-2">
+                  <input type="hidden" name="storeId" value={store.id} />
+                  <input type="hidden" name="text" value={`Supplier invoice for ${store.name}'s orders of ${d.date}.`} />
+                  <input type="file" name="file" required accept=".pdf,application/pdf,.xlsx,.xls,.xlsm,.csv,.ods,image/png,image/jpeg,image/webp" className="input min-w-0 flex-1 py-1 text-xs" aria-label={`Invoice for ${d.date}`} />
+                  <SubmitButton pendingLabel="Reading…">Upload</SubmitButton>
+                </form>
+              </li>
+            ))}
+          </ul>
         )}
         {todo.pending.length > 0 && (
           <ul className="space-y-1 border-t border-border pt-2 text-sm">

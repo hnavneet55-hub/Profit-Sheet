@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { importAdsDays, validAdsToken } from "@/lib/ads-script";
+import { adsDaysToSend, importAdsDays, validAdsToken } from "@/lib/ads-script";
 
 const Body = z.object({
   storeId: z.number().int().positive(),
@@ -9,7 +9,15 @@ const Body = z.object({
   days: z.array(z.object({ date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), cost: z.number().min(0), clicks: z.number().min(0) })).max(93),
 });
 
-/** Called by each store's Google Ads script with the last few days of cost and clicks. */
+/** The script asks first how many days to send: 30 on its first run, then the days since its last report. */
+export async function GET(request: Request) {
+  const q = new URL(request.url).searchParams;
+  const storeId = Number(q.get("storeId"));
+  if (!storeId || !validAdsToken(storeId, q.get("token") ?? "")) return new Response("Wrong store ID or token", { status: 401 });
+  return Response.json({ days: await adsDaysToSend(storeId) });
+}
+
+/** Called by each store's Google Ads script with the days' cost and clicks. */
 export async function POST(request: Request) {
   const parsed = Body.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return new Response("Bad request", { status: 400 });

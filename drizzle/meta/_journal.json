@@ -36,6 +36,13 @@
       "when": 1792518251671,
       "tag": "0004_ad_cpc_cvr",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1792572623576,
+      "tag": "0005_ads_reports",
+      "breakpoints": true
     }
   ]
 }

@@ -16,6 +16,7 @@ import { inputFromForm } from "@/lib/supplier-files";
 import { importProfitSheet, parseProfitSheet, sheetTabs, undoProfitSheet, type ImportResult } from "@/lib/sheet-import";
 import { listStores } from "@/lib/stores";
 import { ask, type AskTurn, type AskResult } from "@/lib/ask";
+import { applyGoogleFigures } from "@/lib/ads-script";
 
 const str = (f: FormData, k: string) => String(f.get(k) ?? "").trim();
 const numOr = (f: FormData, k: string, d = 0) => {
@@ -136,6 +137,15 @@ export async function setAdSpendCpc(form: FormData) {
   if (!(cpc > 0)) return;
   const db = await getDb();
   await db.update(schema.adSpend).set({ cpc }).where(eq(schema.adSpend.id, Number(str(form, "id"))));
+  revalidatePath("/", "layout");
+}
+
+/** Takes Google Ads' figures for the given days (one, or every day that differs). */
+export async function takeGoogleAdsFigures(form: FormData) {
+  const storeId = Number(str(form, "storeId"));
+  const dates = form.getAll("date").map(String).filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d));
+  if (!storeId) return;
+  await applyGoogleFigures(storeId, dates);
   revalidatePath("/", "layout");
 }
 

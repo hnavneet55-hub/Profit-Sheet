@@ -156,6 +156,22 @@ export const adSpend = pgTable(
   (t) => [index("ad_spend_date_idx").on(t.date)],
 );
 
+// What each store's Google Ads script reported per day, kept as sent so it can be
+// checked against the ad spend entered by hand or imported from the old sheet.
+export const adsReports = pgTable(
+  "ads_reports",
+  {
+    storeId: integer("store_id").notNull().references(() => stores.id, { onDelete: "cascade" }),
+    date: date("date").notNull(),
+    currency: text("currency").notNull(),
+    account: text("account"),
+    cost: doublePrecision("cost").notNull(),
+    clicks: doublePrecision("clicks").notNull(),
+    receivedAt: timestamp("received_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.storeId, t.date] })],
+);
+
 // Cost of goods per SKU. The row with the latest effective_from on or before
 // an order's date applies to that order.
 export const productCosts = pgTable(

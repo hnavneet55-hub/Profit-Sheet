@@ -21,6 +21,7 @@ export default async function InvoicePage(props: PageProps<"/invoices/[id]">) {
     .orderBy(asc(schema.invoiceOrders.id));
   const reviewing = inv.status === "pending";
   const unmatched = rows.filter(({ r }) => r.status === "pending" && !r.orderId).length;
+  const flagged = rows.filter(({ r }) => r.status === "pending" && r.orderId && r.flags.length > 0).length;
   const approvedBase = rows.reduce((n, { r }) => n + (r.status === "approved" ? (r.amountBase ?? 0) : 0), 0);
 
   return (
@@ -43,6 +44,17 @@ export default async function InvoicePage(props: PageProps<"/invoices/[id]">) {
       {inv.flags.length > 0 && (
         <div className="space-y-1 rounded-lg bg-warn-bg px-4 py-3 text-sm text-warn-text">
           {inv.flags.map((f, i) => <p key={i}>⚠ {f}</p>)}
+        </div>
+      )}
+
+      {reviewing && rows.length > 0 && (
+        <div className="alert-warn space-y-1 text-sm">
+          <p className="font-medium">Not applied yet: these orders still count as not invoiced.</p>
+          <p>
+            Check the lines below, then press <b>Apply ticked orders</b> at the bottom. Only ticked lines become the orders&apos; cost of goods; unticked lines are rejected.
+            {flagged > 0 && ` ${flagged} matched line${flagged === 1 ? " has" : "s have"} a warning and ${flagged === 1 ? "is" : "are"} unticked: tick ${flagged === 1 ? "it" : "them"} if the cost is right.`}
+            {unmatched > 0 && ` ${unmatched} line${unmatched === 1 ? " isn't" : "s aren't"} matched to an order: type the order number and press Match typed order numbers first.`}
+          </p>
         </div>
       )}
 

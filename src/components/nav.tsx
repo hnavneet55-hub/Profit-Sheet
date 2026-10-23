@@ -18,6 +18,7 @@ const ITEMS = [
   { href: "/quotes", label: "Supplier quotes" },
   { href: "/stores", label: "Stores" },
   { href: "/import", label: "Import old sheets" },
+  { href: "/logs", label: "Activity log" },
 ];
 
 export function Nav() {

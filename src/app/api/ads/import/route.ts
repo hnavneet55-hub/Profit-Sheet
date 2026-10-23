@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { logActivity } from "@/lib/activity";
 import { adsDaysToSend, importAdsDays, validAdsToken } from "@/lib/ads-script";
 
 const Body = z.object({
@@ -24,8 +25,18 @@ export async function POST(request: Request) {
   const b = parsed.data;
   if (!validAdsToken(b.storeId, b.token)) return new Response("Wrong store ID or token", { status: 401 });
   try {
-    return Response.json(await importAdsDays(b.storeId, b.currency.toUpperCase(), b.account ?? null, b.days));
+    const result = await importAdsDays(b.storeId, b.currency.toUpperCase(), b.account ?? null, b.days);
+    await logActivity({
+      source: "script",
+      actor: "Google Ads script",
+      area: "Ad spend",
+      summary: `Google Ads script reported ${b.days.length} day${b.days.length === 1 ? "" : "s"}${b.days.length ? ` (${b.days[0].date} to ${b.days[b.days.length - 1].date})` : ""}`,
+      storeId: b.storeId,
+      details: { account: b.account ?? null, currency: b.currency, result },
+    });
+    return Response.json(result);
   } catch (e) {
+    await logActivity({ source: "script", actor: "Google Ads script", area: "Ad spend", summary: `Google Ads script report failed: ${e instanceof Error ? e.message : "Failed"}`, storeId: b.storeId });
     return new Response(e instanceof Error ? e.message : "Failed", { status: 422 });
   }
 }

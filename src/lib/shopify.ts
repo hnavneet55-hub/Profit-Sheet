@@ -79,6 +79,7 @@ export type ShopifyOrder = {
   totalShippingPriceSet: Money;
   totalTaxSet: Money;
   totalPriceSet: Money;
+  disputes: { id: string; initiatedAs: string; status: string }[];
   lineItems: { nodes: { id: string; sku: string | null; name: string; quantity: number }[] };
   refunds: {
     id: string;
@@ -129,6 +130,7 @@ query SyncOrders($first: Int!, $after: String, $query: String) {
       totalShippingPriceSet { shopMoney { amount } }
       totalTaxSet { shopMoney { amount } presentmentMoney { amount } }
       totalPriceSet { shopMoney { amount } presentmentMoney { amount } }
+      disputes { id initiatedAs status }
       lineItems(first: 100) {
         nodes { id sku name quantity }
       }
@@ -149,5 +151,18 @@ query SyncOrders($first: Int!, $after: String, $query: String) {
         fees { amount { amount currencyCode } type }
       }
     }
+  }
+}`;
+
+export type DisputesPage = {
+  orders: { pageInfo: { hasNextPage: boolean; endCursor: string | null }; nodes: { id: string; disputes: ShopifyOrder["disputes"] }[] };
+};
+
+// Only the disputes of recent orders; used to catch disputes that don't touch an order's updated_at.
+export const DISPUTES_QUERY = /* GraphQL */ `
+query OrderDisputes($first: Int!, $after: String, $query: String) {
+  orders(first: $first, after: $after, query: $query, sortKey: CREATED_AT) {
+    pageInfo { hasNextPage endCursor }
+    nodes { id disputes { id initiatedAs status } }
   }
 }`;

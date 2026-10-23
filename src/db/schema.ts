@@ -63,6 +63,11 @@ export const orders = pgTable(
     netRevenue: doublePrecision("net_revenue").notNull(),
     reportedFees: doublePrecision("reported_fees"), // null when Shopify reports none
     gateways: text("gateways"),
+    // Disputes Shopify knows about (Shopify Payments only). An inquiry is a question from the bank;
+    // a chargeback is the money taken back. chargebackStatus: NEEDS_RESPONSE, UNDER_REVIEW, WON, LOST, ...
+    chargeback: boolean("chargeback").notNull().default(false),
+    chargebackStatus: text("chargeback_status"),
+    inquiry: boolean("inquiry").notNull().default(false),
     // Derived values, recomputed when costs or rates change
     fxRate: doublePrecision("fx_rate"), // 1 unit shop currency in base currency
     netRevenueBase: doublePrecision("net_revenue_base"),
@@ -301,3 +306,28 @@ export const settings = pgTable("settings", {
   key: text("key").primaryKey(),
   value: text("value").notNull(),
 });
+
+// Who changed what and when: user actions, Google Ads script reports, hourly syncs.
+// store_name is copied in so entries stay readable after a store is deleted.
+export const activityLog = pgTable(
+  "activity_log",
+  {
+    id: serial("id").primaryKey(),
+    at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+    day: date("day").notNull(), // calendar day in REPORT_TIMEZONE
+    source: text("source").notNull(), // user | script | api | cron
+    actor: text("actor").notNull(), // user ID, "Google Ads script", "Hourly sync"
+    area: text("area").notNull(), // Ad spend, Invoices, Stores, ...
+    summary: text("summary").notNull(),
+    storeId: integer("store_id"),
+    storeName: text("store_name"),
+    details: jsonb("details"),
+  },
+  (t) => [
+    index("activity_log_day_idx").on(t.day, t.at),
+    index("activity_log_actor_idx").on(t.actor),
+    index("activity_log_area_idx").on(t.area),
+    index("activity_log_store_idx").on(t.storeId),
+    index("activity_log_source_idx").on(t.source),
+  ],
+);

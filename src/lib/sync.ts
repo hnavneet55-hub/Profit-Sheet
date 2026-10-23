@@ -1,7 +1,7 @@
 import "server-only";
 import { eq, inArray } from "drizzle-orm";
 import { getDb, schema } from "@/db";
-import { ORDERS_QUERY, shopifyGraphql, type OrdersPage, type ShopifyOrder } from "./shopify";
+import { DISPUTES_QUERY, ORDERS_QUERY, shopifyGraphql, type DisputesPage, type OrdersPage, type ShopifyOrder } from "./shopify";
 import { recomputeOrders } from "./costs";
 import { toReportDate } from "./dates";
 
@@ -12,6 +12,17 @@ const TIME_BUDGET_MS = 240_000;
 type Store = typeof schema.stores.$inferSelect;
 
 const num = (s: string | undefined) => (s ? Number(s) : 0);
+
+/** The order's chargeback state: a chargeback outranks an inquiry; the latest chargeback's status is kept. */
+function disputeFields(disputes: ShopifyOrder["disputes"] | null | undefined) {
+  const list = disputes ?? [];
+  const chargebacks = list.filter((d) => d.initiatedAs === "CHARGEBACK");
+  return {
+    chargeback: chargebacks.length > 0,
+    chargebackStatus: chargebacks.at(-1)?.status ?? null,
+    inquiry: list.some((d) => d.initiatedAs === "INQUIRY"),
+  };
+}
 
 async function saveOrder(store: Store, o: ShopifyOrder) {
   const db = await getDb();
@@ -47,6 +58,7 @@ async function saveOrder(store: Store, o: ShopifyOrder) {
     netRevenue: cancelled && !o.refunds.length ? 0 : totalPrice - totalTax,
     reportedFees,
     gateways,
+    ...disputeFields(o.disputes),
     syncedAt: new Date(),
   };
   await db.insert(schema.orders).values(row).onConflictDoUpdate({ target: schema.orders.id, set: row });
@@ -97,6 +109,27 @@ async function saveOrder(store: Store, o: ShopifyOrder) {
   }
 }
 
+const DISPUTE_SWEEP_DAYS = 120;
+const DISPUTE_SWEEP_EVERY_MS = 6 * 3600_000;
+
+/** Re-reads the disputes of the last months' orders, since a bank dispute may not show up as an order update. */
+async function sweepDisputes(store: Store, deadline: number) {
+  const db = await getDb();
+  const key = `disputes_sweep_${store.id}`;
+  const [done] = await db.select().from(schema.settings).where(eq(schema.settings.key, key));
+  if (done && Date.now() - Number(done.value) < DISPUTE_SWEEP_EVERY_MS) return;
+  const since = new Date(Date.now() - DISPUTE_SWEEP_DAYS * 86400_000).toISOString();
+  let after: string | null = null;
+  for (;;) {
+    const page: DisputesPage = await shopifyGraphql<DisputesPage>(store, DISPUTES_QUERY, { first: 100, after, query: `created_at:>='${since}'` });
+    for (const o of page.orders.nodes) await db.update(schema.orders).set(disputeFields(o.disputes)).where(eq(schema.orders.id, o.id));
+    if (!page.orders.pageInfo.hasNextPage) break;
+    if (Date.now() > deadline) return; // unfinished: the next run starts the sweep again
+    after = page.orders.pageInfo.endCursor;
+  }
+  await db.insert(schema.settings).values({ key, value: String(Date.now()) }).onConflictDoUpdate({ target: schema.settings.key, set: { value: String(Date.now()) } });
+}
+
 export type SyncResult = { storeId: number; store: string; orders: number; complete: boolean; error?: string };
 
 export async function syncStore(store: Store, deadline = Date.now() + TIME_BUDGET_MS): Promise<SyncResult> {
@@ -134,6 +167,8 @@ export async function syncStore(store: Store, deadline = Date.now() + TIME_BUDGE
           .update(schema.stores)
           .set({ lastSyncedAt: new Date(), lastSyncError: null })
           .where(eq(schema.stores.id, store.id));
+        // Chargebacks are a side check: a failure here must not mark the order sync as failed.
+        await sweepDisputes(store, deadline).catch((e) => console.error(`dispute sweep ${store.name}`, e));
         return { storeId: store.id, store: store.name, orders: count, complete: true };
       }
       after = page.orders.pageInfo.endCursor;

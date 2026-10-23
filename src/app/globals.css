@@ -18,6 +18,13 @@
   --warn-border: #f2c96b;
   --chart-pos: #2a78d6;
   --chart-neg: #d6453d;
+  --chart-1: #2a78d6;
+  --chart-2: #e08a1e;
+  --chart-3: #8a5cc9;
+  --chart-4: #d6453d;
+  --chart-5: #2a9d8f;
+  --chart-6: #c2679a;
+  --chart-7: #7d8794;
   --grid: #e9edf2;
   --ads-bg: #f3f6fd;
 }
@@ -41,6 +48,13 @@
     --warn-border: #6b5418;
     --chart-pos: #3987e5;
     --chart-neg: #e66767;
+    --chart-1: #5b9cf0;
+    --chart-2: #f0a94a;
+    --chart-3: #b08ae6;
+    --chart-4: #e66767;
+    --chart-5: #4fc0b2;
+    --chart-6: #e08ab8;
+    --chart-7: #a3adbb;
     --grid: #252b36;
     --ads-bg: #19202d;
   }

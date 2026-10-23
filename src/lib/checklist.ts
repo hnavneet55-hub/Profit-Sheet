@@ -6,6 +6,7 @@ import { sheetCogsUntil } from "./report";
 export type DayStatus = {
   orders: number; // not cancelled
   invoiced: number; // of those, covered by an approved supplier invoice
+  awaiting: number; // not invoiced yet, but matched on an uploaded invoice nobody has applied
   missingCost: number; // not invoiced and some product has no SKU cost
   adSpend: number; // in the ad account currency (summed; one account per store is assumed)
   adCurrency: string | null;
@@ -16,7 +17,7 @@ export type DayStatus = {
   dayWise: boolean; // up to the end of the old sheet: costed per day, so no invoices are expected
 };
 
-const blank = (): DayStatus => ({ orders: 0, invoiced: 0, missingCost: 0, adSpend: 0, adCurrency: null, adRows: 0, adNoCpc: 0, refunds: 0, sheetCogs: false, dayWise: false });
+const blank = (): DayStatus => ({ orders: 0, invoiced: 0, awaiting: 0, missingCost: 0, adSpend: 0, adCurrency: null, adRows: 0, adNoCpc: 0, refunds: 0, sheetCogs: false, dayWise: false });
 
 /** What has been entered for each store on each day: `status.get(storeId)!.get(date)`. */
 export async function dailyStatus(storeIds: number[], from: string, to: string): Promise<Map<number, Map<string, DayStatus>>> {
@@ -37,6 +38,16 @@ export async function dailyStatus(storeIds: number[], from: string, to: string):
     c.orders = Number(r.orders);
     c.invoiced = Number(r.invoiced);
     c.missingCost = Number(r.missing);
+  }
+  for (const r of await readOnlyQuery(`
+    select o.store_id, o.order_date::text as d, count(distinct o.id) as n
+    from invoice_orders io
+    join supplier_invoices i on i.id = io.invoice_id
+    join orders o on o.id = io.order_id
+    where i.status = 'pending' and io.status = 'pending' and not o.cancelled and o.cogs_source <> 'invoice' and o.order_date ${range}
+    group by 1, 2`)) {
+    const c = cell(r.store_id, r.d);
+    if (c) c.awaiting = Number(r.n);
   }
   for (const r of await readOnlyQuery(`
     select store_id, date::text as d, sum(amount) as amount, min(currency) as currency, count(*) as n,
@@ -72,9 +83,10 @@ export type StoreTodo = {
   cpcRows: { id: number; date: string; amount: number; currency: string }[]; // ad spend entered without a CPC
   orders: number; // orders costed one by one (after the old sheet ends)
   notInvoiced: number; // of those, not on a supplier invoice yet
-  invoiceDays: { date: string; orders: number; notInvoiced: number; missingCost: number }[]; // days with orders still to invoice, newest first
+  awaiting: number; // of those, matched on an uploaded invoice that hasn't been applied
+  invoiceDays: { date: string; orders: number; notInvoiced: number; awaiting: number; missingCost: number }[]; // days with orders still to invoice, newest first
   missingCost: number; // of those, with no cost at all (within the missing-cost window)
-  pending: { id: number; label: string }[]; // invoices read but not reviewed yet
+  pending: { id: number; label: string; matched: number; dates: string }[]; // invoices read but not applied yet; matched orders and their date span
   count: number; // things to do, for the store tabs
 };
 
@@ -95,8 +107,13 @@ export async function storeTodos(storeIds: number[], from: string, to: string, m
     select id, store_id, date::text as d, amount, currency from ad_spend
     where store_id in (${ids}) and date ${range} and amount > 0 and (cpc is null or cpc <= 0) order by date`);
   const pending = await readOnlyQuery(`
-    select id, store_id, coalesce(supplier, filename, 'Invoice #' || id) as label from supplier_invoices
-    where status = 'pending' and store_id in (${ids}) order by created_at`);
+    select i.id, i.store_id, coalesce(i.supplier, i.filename, 'Invoice #' || i.id) as label,
+      count(distinct io.order_id) as matched, min(o.order_date)::text as first, max(o.order_date)::text as last
+    from supplier_invoices i
+    left join invoice_orders io on io.invoice_id = i.id and io.status = 'pending'
+    left join orders o on o.id = io.order_id
+    where i.status = 'pending' and i.store_id in (${ids})
+    group by i.id order by i.created_at`);
   const out = new Map<number, StoreTodo>();
   for (const id of storeIds) {
     const start = first.get(id);
@@ -107,12 +124,15 @@ export async function storeTodos(storeIds: number[], from: string, to: string, m
       cpcRows: cpcRows.filter((r) => Number(r.store_id) === id).map((r) => ({ id: Number(r.id), date: String(r.d), amount: Number(r.amount), currency: String(r.currency) })),
       orders: after.reduce((n, [, c]) => n + c.orders, 0),
       notInvoiced: after.reduce((n, [, c]) => n + c.orders - c.invoiced, 0),
+      awaiting: after.reduce((n, [, c]) => n + c.awaiting, 0),
       missingCost: after.reduce((n, [d, c]) => n + (d >= missingFrom ? c.missingCost : 0), 0),
       invoiceDays: after
         .filter(([, c]) => c.orders > c.invoiced)
-        .map(([date, c]) => ({ date, orders: c.orders, notInvoiced: c.orders - c.invoiced, missingCost: date >= missingFrom ? c.missingCost : 0 }))
+        .map(([date, c]) => ({ date, orders: c.orders, notInvoiced: c.orders - c.invoiced, awaiting: c.awaiting, missingCost: date >= missingFrom ? c.missingCost : 0 }))
         .reverse(),
-      pending: pending.filter((r) => Number(r.store_id) === id).map((r) => ({ id: Number(r.id), label: String(r.label) })),
+      pending: pending
+        .filter((r) => Number(r.store_id) === id)
+        .map((r) => ({ id: Number(r.id), label: String(r.label), matched: Number(r.matched), dates: r.first ? (r.first === r.last ? String(r.first) : `${r.first} to ${r.last}`) : "" })),
       count: 0,
     };
     t.count = t.adDays.length + t.cpcRows.length + t.pending.length + t.invoiceDays.length;

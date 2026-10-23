@@ -170,7 +170,7 @@ async function checkOrder(
 }
 
 /** Reads an invoice with Claude, matches it to the store's orders and stores it for review. */
-export async function importInvoice(input: SupplierInput, storeId: number, filename: string): Promise<number> {
+export async function importInvoice(input: SupplierInput, storeId: number, filename: string, forDate?: string): Promise<number> {
   const db = await getDb();
   const [imp] = await db.insert(schema.supplierInvoices).values({ storeId, filename, status: "processing" }).returning({ id: schema.supplierInvoices.id });
   try {
@@ -178,7 +178,7 @@ export async function importInvoice(input: SupplierInput, storeId: number, filen
     const store = stores.find((s) => s.id === storeId);
     if (!store) throw new Error("Store not found");
     const parsed = await extract(input, store, stores.filter((s) => s.id !== storeId).map((s) => `${s.name} (${s.shopDomain})`));
-    await saveInvoice(imp.id, store, stores, parsed);
+    await saveInvoice(imp.id, store, stores, parsed, forDate);
   } catch (e) {
     await db
       .update(schema.supplierInvoices)
@@ -190,8 +190,11 @@ export async function importInvoice(input: SupplierInput, storeId: number, filen
 
 type Store = typeof schema.stores.$inferSelect;
 
-/** Matches Claude's reading of an invoice to orders and records it as pending review. */
-export async function saveInvoice(invoiceId: number, store: Store, stores: Store[], parsed: ParsedInvoice): Promise<void> {
+/**
+ * Matches Claude's reading of an invoice to orders and records it as pending review.
+ * `forDate` is the order day it was uploaded for, if any.
+ */
+export async function saveInvoice(invoiceId: number, store: Store, stores: Store[], parsed: ParsedInvoice, forDate?: string): Promise<void> {
   const db = await getDb();
   const invoiceDate = parsed.invoice_date && /^\d{4}-\d{2}-\d{2}$/.test(parsed.invoice_date) ? parsed.invoice_date : null;
   const index = await orderIndex(store.id);
@@ -257,6 +260,7 @@ export async function saveInvoice(invoiceId: number, store: Store, stores: Store
   }
   if (rows.length) await db.insert(schema.invoiceOrders).values(rows);
   if (!rows.length) invoiceFlags.push("No order numbers found on this invoice");
+  invoiceFlags.unshift(...(await coverageFlags(invoiceId, rows.flatMap((r) => (r.orderId ? [r.orderId] : [])), forDate)));
   await db
     .update(schema.supplierInvoices)
     .set({
@@ -271,6 +275,36 @@ export async function saveInvoice(invoiceId: number, store: Store, stores: Store
       flags: invoiceFlags,
     })
     .where(eq(schema.supplierInvoices.id, invoiceId));
+}
+
+const day = (d: string) => new Date(`${d}T12:00:00Z`).toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" });
+
+/**
+ * The mistakes that leave orders uninvoiced although the upload "worked": a bill that was
+ * already applied, or a file whose orders aren't from the day it was uploaded for.
+ */
+async function coverageFlags(invoiceId: number, orderIds: string[], forDate?: string): Promise<string[]> {
+  if (!orderIds.length) return [];
+  const db = await getDb();
+  const flags: string[] = [];
+  const applied = await db
+    .selectDistinct({ orderId: schema.invoiceOrders.orderId, number: schema.supplierInvoices.invoiceNumber, invoiceId: schema.invoiceOrders.invoiceId })
+    .from(schema.invoiceOrders)
+    .innerJoin(schema.supplierInvoices, eq(schema.invoiceOrders.invoiceId, schema.supplierInvoices.id))
+    .where(and(inArray(schema.invoiceOrders.orderId, orderIds), ne(schema.invoiceOrders.invoiceId, invoiceId), eq(schema.invoiceOrders.status, "approved")));
+  const done = new Set(applied.map((a) => a.orderId));
+  if (orderIds.every((id) => done.has(id))) {
+    const bills = [...new Set(applied.map((a) => a.number ?? `#${a.invoiceId}`))].join(", ");
+    flags.push(`Nothing new: every order on this file is already applied from ${bills}. This is a re-upload, so it changes nothing; delete it.`);
+  }
+  if (forDate) {
+    const dates = (await db.select({ d: schema.orders.orderDate }).from(schema.orders).where(inArray(schema.orders.id, orderIds))).map((o) => o.d).sort();
+    if (!dates.includes(forDate)) {
+      const span = dates[0] === dates.at(-1) ? day(dates[0]) : `${day(dates[0])} to ${day(dates.at(-1)!)}`;
+      flags.push(`Uploaded for ${day(forDate)}, but none of its orders are from ${day(forDate)} (they're from ${span}). ${day(forDate)}'s orders stay not invoiced until the supplier's bill for them is uploaded.`);
+    }
+  }
+  return flags;
 }
 
 /** Points an unmatched invoice line at the order the user typed, re-running the checks. */

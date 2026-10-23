@@ -17,6 +17,7 @@ import { importProfitSheet, parseProfitSheet, sheetTabs, undoProfitSheet, type I
 import { listStores } from "@/lib/stores";
 import { ask, type AskTurn, type AskResult } from "@/lib/ask";
 import { applyGoogleFigures } from "@/lib/ads-script";
+import { logActivity } from "@/lib/activity";
 
 const str = (f: FormData, k: string) => String(f.get(k) ?? "").trim();
 const numOr = (f: FormData, k: string, d = 0) => {
@@ -28,7 +29,10 @@ const numOr = (f: FormData, k: string, d = 0) => {
 
 export async function login(_: string | null, form: FormData): Promise<string | null> {
   const account = findAccount(str(form, "user"), str(form, "password"));
-  if (!account) return "Wrong user ID or password";
+  if (!account) {
+    await logActivity({ area: "Sign-in", summary: `Failed sign-in for "${str(form, "user")}"`, actor: str(form, "user") || "(blank)" });
+    return "Wrong user ID or password";
+  }
   (await cookies()).set(SESSION_COOKIE, await sessionToken(account), {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
@@ -36,11 +40,13 @@ export async function login(_: string | null, form: FormData): Promise<string | 
     maxAge: 60 * 60 * 24 * 30,
     path: "/",
   });
+  await logActivity({ area: "Sign-in", summary: "Signed in", actor: account.user });
   const next = str(form, "next");
   redirect(next.startsWith("/") ? next : "/");
 }
 
 export async function logout() {
+  await logActivity({ area: "Sign-in", summary: "Signed out" });
   (await cookies()).delete(SESSION_COOKIE);
   redirect("/login");
 }
@@ -81,8 +87,12 @@ export async function saveStore(form: FormData) {
   if (id) {
     await db.update(schema.stores).set(values).where(eq(schema.stores.id, id));
     await recomputeForStore(id); // fee rules may have changed
+    const shown = Object.fromEntries(Object.entries(values).filter(([k]) => !/token|secret|clientId/i.test(k))); // never log credentials
+    const changedKeys = ["accessToken", "clientId", "clientSecret"].filter((k) => str(form, k));
+    await logActivity({ area: "Stores", summary: `Edited store ${values.name}${changedKeys.length ? ` (new ${changedKeys.join(", ")})` : ""}`, storeId: id, details: shown });
   } else {
-    await db.insert(schema.stores).values(values as typeof schema.stores.$inferInsert);
+    const [row] = await db.insert(schema.stores).values(values as typeof schema.stores.$inferInsert).returning({ id: schema.stores.id });
+    await logActivity({ area: "Stores", summary: `Added store ${values.name} (${values.shopDomain})`, storeId: row.id });
   }
   revalidatePath("/", "layout");
   redirect("/stores");
@@ -90,14 +100,22 @@ export async function saveStore(form: FormData) {
 
 export async function deleteStore(form: FormData) {
   const db = await getDb();
+  const [store] = await db.select({ name: schema.stores.name }).from(schema.stores).where(eq(schema.stores.id, Number(str(form, "id"))));
   await db.delete(schema.stores).where(eq(schema.stores.id, Number(str(form, "id"))));
+  await logActivity({ area: "Stores", summary: `Deleted store ${store?.name ?? `#${str(form, "id")}`} with all its data` });
   revalidatePath("/", "layout");
   redirect("/stores");
 }
 
 export async function syncNow(form: FormData) {
   const id = Number(str(form, "id")) || undefined;
-  await syncStores(id ? [id] : undefined);
+  const results = await syncStores(id ? [id] : undefined);
+  await logActivity({
+    area: "Sync",
+    summary: `Manual sync: ${results.map((r) => `${r.store} ${r.orders} orders${r.error ? ` (error: ${r.error})` : ""}`).join("; ") || "no stores"}`,
+    storeId: id ?? null,
+    details: { results },
+  });
   revalidatePath("/", "layout");
 }
 
@@ -108,6 +126,7 @@ async function insertAdSpend(rows: { date: string; storeId: number | null; platf
   const values = [];
   for (const r of rows) values.push({ ...r, amountBase: await toBase(r.amount, r.currency, r.date) });
   if (values.length) await db.insert(schema.adSpend).values(values);
+  return values;
 }
 
 export async function addAdSpend(form: FormData) {
@@ -131,11 +150,19 @@ export async function addAdSpend(form: FormData) {
         return { date, amount: Number(amount), cpc: Number(cpc) || null };
       })
       .filter((r) => /^\d{4}-\d{2}-\d{2}$/.test(r.date) && Number.isFinite(r.amount));
-    await insertAdSpend(rows.map((r) => ({ ...base, ...r })));
+    const added = await insertAdSpend(rows.map((r) => ({ ...base, ...r })));
+    await logActivity({ area: "Ad spend", summary: `Pasted ${added.length} ad spend days (${base.currency})`, storeId, details: { rows: added.map((r) => ({ date: r.date, amount: r.amount, cpc: r.cpc })) } });
   } else {
     // "No ads" records the day as 0 so it stops showing as missing.
     const noAds = str(form, "noAds") === "1";
-    await insertAdSpend([{ ...base, date: str(form, "date"), amount: noAds ? 0 : numOr(form, "amount"), cpc: noAds ? null : numOr(form, "cpc") || null }]);
+    const amount = noAds ? 0 : numOr(form, "amount");
+    const cpc = noAds ? null : numOr(form, "cpc") || null;
+    await insertAdSpend([{ ...base, date: str(form, "date"), amount, cpc }]);
+    await logActivity({
+      area: "Ad spend",
+      summary: noAds ? `Marked ${str(form, "date")} as no ads` : `Added ad spend ${str(form, "date")}: ${amount} ${base.currency}${cpc ? `, CPC ${cpc}` : ""}`,
+      storeId,
+    });
   }
   revalidatePath("/", "layout");
 }
@@ -145,7 +172,8 @@ export async function setAdSpendCpc(form: FormData) {
   const cpc = numOr(form, "cpc");
   if (!(cpc > 0)) return;
   const db = await getDb();
-  await db.update(schema.adSpend).set({ cpc }).where(eq(schema.adSpend.id, Number(str(form, "id"))));
+  const [row] = await db.update(schema.adSpend).set({ cpc }).where(eq(schema.adSpend.id, Number(str(form, "id")))).returning();
+  if (row) await logActivity({ area: "Ad spend", summary: `Set CPC ${cpc} on ${row.date}`, storeId: row.storeId });
   revalidatePath("/", "layout");
 }
 
@@ -155,12 +183,14 @@ export async function takeGoogleAdsFigures(form: FormData) {
   const dates = form.getAll("date").map(String).filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d));
   if (!storeId) return;
   await applyGoogleFigures(storeId, dates);
+  await logActivity({ area: "Ad spend", summary: `Took Google Ads figures for ${dates.length} day${dates.length === 1 ? "" : "s"}: ${dates.join(", ")}`, storeId });
   revalidatePath("/", "layout");
 }
 
 export async function deleteAdSpend(form: FormData) {
   const db = await getDb();
-  await db.delete(schema.adSpend).where(eq(schema.adSpend.id, Number(str(form, "id"))));
+  const [row] = await db.delete(schema.adSpend).where(eq(schema.adSpend.id, Number(str(form, "id")))).returning();
+  if (row) await logActivity({ area: "Ad spend", summary: `Deleted ad spend ${row.date}: ${row.amount} ${row.currency}`, storeId: row.storeId });
   revalidatePath("/", "layout");
 }
 
@@ -178,13 +208,17 @@ export async function setCost(form: FormData) {
     source: "manual",
   });
   await recomputeForSkus([sku]);
+  await logActivity({ area: "Product costs", summary: `Set cost of ${sku}: ${numOr(form, "unitCost")} ${str(form, "currency").toUpperCase()} from ${str(form, "effectiveFrom")}` });
   revalidatePath("/", "layout");
 }
 
 export async function deleteCost(form: FormData) {
   const db = await getDb();
   const [row] = await db.delete(schema.productCosts).where(eq(schema.productCosts.id, Number(str(form, "id")))).returning();
-  if (row) await recomputeForSkus([row.sku]);
+  if (row) {
+    await recomputeForSkus([row.sku]);
+    await logActivity({ area: "Product costs", summary: `Deleted cost of ${row.sku}: ${row.unitCost} ${row.currency} from ${row.effectiveFrom}` });
+  }
   revalidatePath("/", "layout");
 }
 
@@ -194,6 +228,7 @@ export async function uploadQuote(form: FormData) {
   const read = await inputFromForm(form.get("file"), str(form, "text"));
   if (!read) return;
   const id = await importQuote(read.input, { source: "upload", filename: read.filename });
+  await logActivity({ area: "Supplier quotes", summary: `Uploaded quote ${read.filename ?? "(pasted text)"}`, details: { quoteId: id } });
   revalidatePath("/quotes");
   redirect(`/quotes/${id}`);
 }
@@ -219,6 +254,11 @@ export async function reviewQuote(form: FormData) {
     if (rejected.length) await db.update(schema.quoteItems).set({ status: "rejected" }).where(inArray(schema.quoteItems.id, rejected));
   }
   await db.update(schema.quoteImports).set({ status: "done" }).where(eq(schema.quoteImports.id, importId));
+  await logActivity({
+    area: "Supplier quotes",
+    summary: str(form, "intent") === "reject" ? `Rejected quote #${importId}` : `Reviewed quote #${importId}: ${approved.length} price${approved.length === 1 ? "" : "s"} applied`,
+    details: { quoteId: importId, approved },
+  });
   revalidatePath("/", "layout");
 }
 
@@ -228,7 +268,9 @@ export async function uploadInvoice(form: FormData) {
   const storeId = Number(str(form, "storeId"));
   const read = await inputFromForm(form.get("file"), str(form, "text"));
   if (!storeId || !read) return;
-  const id = await importInvoice(read.input, storeId, read.filename);
+  const forDate = str(form, "forDate");
+  const id = await importInvoice(read.input, storeId, read.filename, /^\d{4}-\d{2}-\d{2}$/.test(forDate) ? forDate : undefined);
+  await logActivity({ area: "Invoices", summary: `Uploaded invoice ${read.filename ?? "(pasted text)"}`, storeId, details: { invoiceId: id } });
   revalidatePath("/", "layout");
   redirect(`/invoices/${id}`);
 }
@@ -237,18 +279,26 @@ export async function reviewInvoice(form: FormData) {
   const invoiceId = Number(str(form, "invoiceId"));
   if (str(form, "intent") === "rematch") {
     // Order numbers typed for lines that didn't match; the page reloads with the new checks.
+    const refs: string[] = [];
     for (const [key, value] of form.entries()) {
       const ref = String(value).trim();
-      if (key.startsWith("ref_") && ref) await rematchInvoiceOrder(Number(key.slice(4)), ref);
+      if (key.startsWith("ref_") && ref) {
+        await rematchInvoiceOrder(Number(key.slice(4)), ref);
+        refs.push(ref);
+      }
     }
+    await logActivity({ area: "Invoices", summary: `Invoice #${invoiceId}: re-matched ${refs.length} line${refs.length === 1 ? "" : "s"} (${refs.join(", ")})`, details: { invoiceId } });
   } else {
-    await reviewInvoiceOrders(invoiceId, str(form, "intent") === "reject" ? [] : form.getAll("approve").map(Number));
+    const approved = str(form, "intent") === "reject" ? [] : form.getAll("approve").map(Number);
+    await reviewInvoiceOrders(invoiceId, approved);
+    await logActivity({ area: "Invoices", summary: approved.length ? `Invoice #${invoiceId}: approved ${approved.length} order${approved.length === 1 ? "" : "s"}` : `Invoice #${invoiceId}: rejected`, details: { invoiceId, approved } });
   }
   revalidatePath("/", "layout");
 }
 
 export async function removeInvoice(form: FormData) {
   await deleteInvoice(Number(str(form, "invoiceId")));
+  await logActivity({ area: "Invoices", summary: `Deleted invoice #${str(form, "invoiceId")}` });
   revalidatePath("/", "layout");
   redirect("/invoices");
 }
@@ -267,19 +317,22 @@ export async function addExpense(form: FormData) {
     monthly,
     until: monthly && str(form, "until") ? str(form, "until") : null,
   });
+  await logActivity({ area: "Expenses", summary: `Added ${monthly ? "monthly " : ""}expense ${str(form, "category") || "Other"}: ${numOr(form, "amount")} ${str(form, "currency").toUpperCase() || "USD"} from ${str(form, "date")}${str(form, "description") ? ` (${str(form, "description")})` : ""}` });
   revalidatePath("/", "layout");
 }
 
 export async function deleteExpense(form: FormData) {
   const db = await getDb();
-  await db.delete(schema.expenses).where(eq(schema.expenses.id, Number(str(form, "id"))));
+  const [row] = await db.delete(schema.expenses).where(eq(schema.expenses.id, Number(str(form, "id")))).returning();
+  if (row) await logActivity({ area: "Expenses", summary: `Deleted expense ${row.category}: ${row.amount} ${row.currency} (${row.date})` });
   revalidatePath("/", "layout");
 }
 
 export async function stopExpense(form: FormData) {
   // A monthly cost that ended: keep its history, stop it from the given date on.
   const db = await getDb();
-  await db.update(schema.expenses).set({ until: str(form, "until") }).where(eq(schema.expenses.id, Number(str(form, "id"))));
+  const [row] = await db.update(schema.expenses).set({ until: str(form, "until") }).where(eq(schema.expenses.id, Number(str(form, "id")))).returning();
+  if (row) await logActivity({ area: "Expenses", summary: `Stopped monthly expense ${row.category} from ${str(form, "until")}` });
   revalidatePath("/", "layout");
 }
 
@@ -314,6 +367,7 @@ export async function importSheet(_: SheetImportState, form: FormData): Promise<
     }
     const results = [];
     for (const [id, tab] of pairs) results.push(await importProfitSheet(id, parseProfitSheet(data, file.name, year, tab), withExpenses));
+    await logActivity({ area: "Sheet import", summary: `Imported old sheet ${file.name}: ${results.length} store${results.length === 1 ? "" : "s"}`, storeId, details: { results, unmatched } });
     revalidatePath("/", "layout");
     return { results, unmatched };
   } catch (e) {
@@ -323,6 +377,7 @@ export async function importSheet(_: SheetImportState, form: FormData): Promise<
 
 export async function undoSheetImport(form: FormData) {
   await undoProfitSheet(Number(str(form, "storeId")));
+  await logActivity({ area: "Sheet import", summary: "Undid the old-sheet import", storeId: Number(str(form, "storeId")) });
   revalidatePath("/", "layout");
 }
 

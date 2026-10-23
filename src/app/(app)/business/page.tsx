@@ -4,7 +4,8 @@ import { listStores } from "@/lib/stores";
 import { addDays, today } from "@/lib/dates";
 import { money, pct, ratio, monthLabel, shortDate } from "@/lib/format";
 import { BASE_CURRENCY, MISSING_COST_DAYS } from "@/lib/config";
-import { ProfitChart } from "@/components/profit-chart";
+import { SheetCharts } from "@/components/sheet-charts";
+import { chargebackKpi, chargebackStats } from "@/lib/chargebacks";
 import { syncNow } from "../../actions";
 import { Kpis, SheetTable, StoreBreakdown, monthRange, parseMonth, shiftMonth } from "../sheet-parts";
 
@@ -16,6 +17,8 @@ export default async function BusinessPage(props: PageProps<"/business">) {
   const { from, to } = monthRange(month);
   const sheet = await buildSheet({ from, to });
   const t = sheet.total;
+  const cbAll = chargebackKpi(await chargebackStats(null, from, to));
+  const cbStores = await Promise.all(stores.filter((s) => s.active).map(async (s) => ({ name: s.name, kpi: chargebackKpi(await chargebackStats(s.id, from, to)) })));
   const tr = ratios(t);
   const ta = adStats(t);
   const lastDay = to < today() ? to : today();
@@ -66,11 +69,21 @@ export default async function BusinessPage(props: PageProps<"/business">) {
         ]}
       />
 
+      <Kpis
+        title="Disputes"
+        items={[
+          { label: "Chargeback rate", value: cbAll.value, sub: cbAll.sub, tone: cbAll.tone },
+          ...cbStores.slice(0, 3).map((c) => ({ label: c.name, value: c.kpi.value, sub: c.kpi.sub, tone: c.kpi.tone })),
+        ]}
+      />
+      {cbStores.length > 3 && (
+        <p className="num text-xs text-muted">Other stores: {cbStores.slice(3).map((c) => `${c.name} ${c.kpi.value}`).join(" · ")}</p>
+      )}
+
       <StoreBreakdown month={month} span={span} stores={stores} link={(sp2) => qs(month, sp2)} />
 
       <section className="card p-4">
-        <h2 className="mb-2 text-sm font-medium">Daily profit, all stores</h2>
-        <ProfitChart currency={BASE_CURRENCY} data={visibleDays.map((d) => ({ date: d.date, label: shortDate(d.date), profit: d.profit, revenue: d.revenue, adSpend: d.adSpend }))} />
+        <SheetCharts currency={BASE_CURRENCY} data={visibleDays.map((d) => ({ ...d, label: shortDate(d.date) }))} />
       </section>
 
       <section className="card overflow-x-auto">

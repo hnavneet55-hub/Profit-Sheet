@@ -13,7 +13,7 @@ const SYSTEM = `You answer questions about an e-commerce business that runs abou
 
 Tables (amounts ending _base are in ${BASE_CURRENCY}, converted with the rate locked for that day):
 - stores(id, name, shop_domain, currency, reporting_currency, payment_fee_pct, payment_fee_fixed, platform_fee_pct, media_buyer_fee_pct, active, last_synced_at)
-- orders(id, store_id, name, created_at, order_date, currency, cancelled, total_price, total_tax, net_revenue, reported_fees, gateways, fx_rate, net_revenue_base, fees_base, cogs_base, cogs_missing)
+- orders(id, store_id, name, created_at, order_date, currency, cancelled, total_price, total_tax, net_revenue, reported_fees, gateways, chargeback (bool), chargeback_status, inquiry (bool), fx_rate, net_revenue_base, fees_base, cogs_base, cogs_missing)
   total_price/total_tax/net_revenue are in the store's currency; net_revenue = total_price - total_tax (excl. VAT, incl. shipping, after discounts). Exclude cancelled orders from order counts.
 - order_lines(id, order_id, sku, name, quantity, unit_cost_base)
 - refunds(id, order_id, store_id, created_at, refund_date, amount, amount_net, amount_base, restocked_qty)

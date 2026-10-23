@@ -50,6 +50,20 @@
       "when": 1792578412722,
       "tag": "0006_cogs_target",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1792583446334,
+      "tag": "0007_activity_log",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1792583652924,
+      "tag": "0008_chargebacks",
+      "breakpoints": true
     }
   ]
 }

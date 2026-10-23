@@ -7,7 +7,8 @@ import { adsCheck } from "@/lib/ads-script";
 import { addDays, today } from "@/lib/dates";
 import { money, pct, ratio, monthLabel, shortDate } from "@/lib/format";
 import { MISSING_COST_DAYS } from "@/lib/config";
-import { ProfitChart } from "@/components/profit-chart";
+import { SheetCharts } from "@/components/sheet-charts";
+import { chargebackKpi, chargebackStats } from "@/lib/chargebacks";
 import { SubmitButton } from "@/components/submit-button";
 import { addAdSpend, setAdSpendCpc, syncNow, uploadInvoice } from "../actions";
 import { Kpis, SheetTable, monthRange, parseMonth, shiftMonth } from "./sheet-parts";
@@ -43,6 +44,7 @@ export default async function StoreSheetPage(props: PageProps<"/">) {
 
   const { from, to } = monthRange(month);
   const sheet = await buildSheet({ storeId: store.id, from, to });
+  const cb = chargebackKpi(await chargebackStats(store.id, from, to));
   const t = sheet.total;
   const tr = ratios(t);
   const ta = adStats(t);
@@ -96,6 +98,7 @@ export default async function StoreSheetPage(props: PageProps<"/">) {
           { label: "POAS", value: ratio(tr.poas), sub: "profit ÷ ad spend" },
         ]}
       />
+      <Kpis title="Disputes" items={[{ label: "Chargeback rate", value: cb.value, sub: cb.sub, tone: cb.tone }]} />
       <Kpis
         title="Advertising"
         items={[
@@ -107,8 +110,7 @@ export default async function StoreSheetPage(props: PageProps<"/">) {
       />
 
       <section className="card p-4">
-        <h2 className="mb-2 text-sm font-medium">Daily profit</h2>
-        <ProfitChart currency={cur} data={visibleDays.map((d) => ({ date: d.date, label: shortDate(d.date), profit: d.profit, revenue: d.revenue, adSpend: d.adSpend }))} />
+        <SheetCharts currency={cur} dayHref={`/cogs?store=${store.id}&date={date}`} data={visibleDays.map((d) => ({ ...d, label: shortDate(d.date) }))} />
       </section>
 
       <section className="card overflow-x-auto">
@@ -136,6 +138,26 @@ function Checklist({ store, todo, adsAt, adsDiffer, next }: { store: Store; todo
   }
 
   return (
+    <>
+    {todo.pending.length > 0 && (
+      <section className="alert-warn space-y-2">
+        <p className="font-medium">
+          ⚠ {todo.pending.length} uploaded invoice{todo.pending.length === 1 ? " hasn't" : "s haven't"} been applied yet
+          {todo.awaiting > 0 && `: ${todo.awaiting} order${todo.awaiting === 1 ? " is" : "s are"} matched but still count as not invoiced`}.
+        </p>
+        <p className="text-sm">Uploading only reads the invoice. Open it, check the ticked lines and press <b>Apply ticked orders</b>. Lines with a warning start unticked: tick them if they&apos;re right, or they&apos;re rejected.</p>
+        <ul className="flex flex-wrap gap-2">
+          {todo.pending.map((p) => (
+            <li key={p.id}>
+              <Link className="btn" href={`/invoices/${p.id}`}>
+                Review &amp; apply {p.label}
+                {p.matched > 0 && <span className="ml-1 text-xs opacity-80">({p.matched} order{p.matched === 1 ? "" : "s"}{p.dates && `, ${p.dates}`})</span>}
+              </Link>
+            </li>
+          ))}
+        </ul>
+      </section>
+    )}
     <section className="grid gap-3 lg:grid-cols-3">
       <Step n={1} title="Ad spend" left={adLeft} hint={adsAt ? `Automatic from Google Ads, last received ${adsAt.toLocaleString("en-GB")}.` : `From Google Ads, in ${cur}: the day's cost and the average CPC.`}>
         {adLeft === 0 && <p className="text-sm text-muted">Entered for every day.</p>}
@@ -197,12 +219,14 @@ function Checklist({ store, todo, adsAt, adsDiffer, next }: { store: Store; todo
                   <Link className="num font-medium hover:underline" href={`/cogs?store=${store.id}&date=${d.date}`} title="See this day's orders and cost of goods">{dayLabel(d.date)}</Link>
                   <Link className="text-xs text-warn-text hover:underline" href={`/orders?store=${store.id}&from=${d.date}&to=${d.date}&invoiced=0`}>
                     {d.notInvoiced === d.orders ? `${d.orders} order${d.orders === 1 ? "" : "s"}, none invoiced` : `${d.notInvoiced} of ${d.orders} orders not invoiced`}
+                    {d.awaiting > 0 && <span className="font-medium"> · {d.awaiting} waiting for Apply</span>}
                     {d.missingCost > 0 && <span className="text-negative"> · {d.missingCost} no cost</span>}
                   </Link>
                 </div>
                 <form action={uploadInvoice} className="flex flex-wrap items-center gap-2">
                   <input type="hidden" name="storeId" value={store.id} />
                   <input type="hidden" name="text" value={`Supplier invoice for ${store.name}'s orders of ${d.date}.`} />
+                  <input type="hidden" name="forDate" value={d.date} />
                   <input type="file" name="file" required accept=".pdf,application/pdf,.xlsx,.xls,.xlsm,.csv,.ods,image/png,image/jpeg,image/webp" className="input min-w-0 flex-1 py-1 text-xs" aria-label={`Invoice for ${d.date}`} />
                   <SubmitButton pendingLabel="Reading…">Upload</SubmitButton>
                 </form>
@@ -212,9 +236,9 @@ function Checklist({ store, todo, adsAt, adsDiffer, next }: { store: Store; todo
         )}
         {todo.pending.length > 0 && (
           <ul className="space-y-1 border-t border-border pt-2 text-sm">
-            <li className="text-xs text-muted">Read, waiting for you to check and approve:</li>
+            <li className="text-xs text-muted">Uploaded, but not applied yet (orders count as invoiced only after Apply):</li>
             {todo.pending.map((p) => (
-              <li key={p.id}><Link className="text-accent underline" href={`/invoices/${p.id}`}>Review {p.label} →</Link></li>
+              <li key={p.id}><Link className="text-accent underline" href={`/invoices/${p.id}`}>Review &amp; apply {p.label} →</Link></li>
             ))}
           </ul>
         )}
@@ -229,6 +253,7 @@ function Checklist({ store, todo, adsAt, adsDiffer, next }: { store: Store; todo
         {todo.count === 0 && next && <Link className="btn" href={next.href}>Next: {next.name} →</Link>}
       </Step>
     </section>
+    </>
   );
 }
 

@@ -4,7 +4,7 @@ import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { getDb, readOnlyQuery, schema } from "@/db";
-import { CLAUDE_MODEL } from "./config";
+import { EXTRACT_MODEL } from "./config";
 import { currentCostBase, recomputeForSkus } from "./costs";
 import { toBase } from "./fx";
 import { today } from "./dates";
@@ -55,7 +55,7 @@ async function extract(input: SupplierInput) {
   // Streamed: long outputs exceed the SDK's limit for a single non-streaming request.
   const res = await client.beta.messages
     .stream({
-      model: CLAUDE_MODEL,
+      model: EXTRACT_MODEL,
       max_tokens: 32000,
       system: SYSTEM,
       messages: [{ role: "user", content }],

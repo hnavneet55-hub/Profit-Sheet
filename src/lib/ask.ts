@@ -3,7 +3,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { betaZodTool } from "@anthropic-ai/sdk/helpers/beta/zod";
 import { z } from "zod";
 import { readOnlyQuery } from "@/db";
-import { BASE_CURRENCY, CLAUDE_MODEL } from "./config";
+import { BASE_CURRENCY, ASK_MODEL } from "./config";
 import { REPORT_TIMEZONE, today } from "./dates";
 
 const MAX_ROWS = 200;
@@ -55,7 +55,7 @@ export async function ask(history: AskTurn[]): Promise<AskResult> {
   });
 
   const final = await client.beta.messages.toolRunner({
-    model: CLAUDE_MODEL,
+    model: ASK_MODEL,
     max_tokens: 16000,
     system: SYSTEM,
     tools: [runSql],

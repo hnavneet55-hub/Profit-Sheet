@@ -4,7 +4,7 @@ import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { z } from "zod";
 import { and, eq, inArray, ne } from "drizzle-orm";
 import { getDb, schema } from "@/db";
-import { CLAUDE_MODEL } from "./config";
+import { EXTRACT_MODEL } from "./config";
 import { recomputeOrders } from "./costs";
 import { toBase } from "./fx";
 import { today } from "./dates";
@@ -63,7 +63,7 @@ Rules:
 - Never guess a currency silently. If none is stated, use the most likely one and add a note saying it was assumed.
 - If the order costs don't add up to the printed total, or anything else looks wrong, add a note.`;
 
-async function extract(input: SupplierInput, store: { name: string; shopDomain: string }, otherStores: string[]): Promise<ParsedInvoice> {
+export async function extract(input: SupplierInput, store: { name: string; shopDomain: string }, otherStores: string[], model: string = EXTRACT_MODEL): Promise<{ parsed: ParsedInvoice; usage: Anthropic.Beta.BetaUsage }> {
   const client = new Anthropic();
   const context = [
     `This invoice was uploaded for the store "${store.name}" (${store.shopDomain}).`,
@@ -75,19 +75,19 @@ async function extract(input: SupplierInput, store: { name: string; shopDomain: 
   // Streamed: long outputs exceed the SDK's limit for a single non-streaming request.
   const res = await client.beta.messages
     .stream({
-      model: CLAUDE_MODEL,
+      model,
       max_tokens: 64000,
       system: SYSTEM,
       messages: [{ role: "user", content: supplierContent(input, context, "supplier invoice") }],
       output_config: { effort: "medium", format: zodOutputFormat(InvoiceSchema) },
-      betas: ["server-side-fallback-2026-07-01"],
-      fallbacks: "default",
+      // Haiku has no server-side fallback.
+      ...(model.startsWith("claude-haiku") ? {} : { betas: ["server-side-fallback-2026-07-01"], fallbacks: "default" as const }),
     })
     .finalMessage();
   if (res.stop_reason === "refusal") throw new Error("Claude declined to process this invoice.");
   if (res.stop_reason === "max_tokens") throw new Error("The invoice is too long to read in one pass. Split it and try again.");
   if (!res.parsed_output) throw new Error("Claude's answer could not be read. Try again.");
-  return res.parsed_output;
+  return { parsed: res.parsed_output, usage: res.usage };
 }
 
 /** "#1234", "1234 ", "dk-1234" → "1234" / "dk1234": case, spaces, # and dashes don't matter. */
@@ -177,7 +177,7 @@ export async function importInvoice(input: SupplierInput, storeId: number, filen
     const stores = await db.select().from(schema.stores);
     const store = stores.find((s) => s.id === storeId);
     if (!store) throw new Error("Store not found");
-    const parsed = await extract(input, store, stores.filter((s) => s.id !== storeId).map((s) => `${s.name} (${s.shopDomain})`));
+    const { parsed } = await extract(input, store, stores.filter((s) => s.id !== storeId).map((s) => `${s.name} (${s.shopDomain})`));
     await saveInvoice(imp.id, store, stores, parsed, forDate);
   } catch (e) {
     await db

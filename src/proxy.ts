@@ -17,5 +17,5 @@ export async function proxy(request: NextRequest) {
 export const config = {
   // Cron routes check CRON_SECRET themselves; the Google Ads import checks its per-store token;
   // the cost export for AdProfit checks COGS_EXPORT_KEY.
-  matcher: ["/((?!login|api/cron|api/ads|api/export|_next/static|_next/image|favicon.ico).*)"],
+  matcher: ["/((?!login|api/cron|api/ads|api/export|_next/static|_next/image|favicon.ico|icon.svg|apple-icon.png).*)"],
 };
